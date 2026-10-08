@@ -94,6 +94,20 @@ export interface AlternativesInput extends Omit<AvailableStartsInput, 'date' | '
 }
 
 /**
+ * The instants `findAlternatives` may look at: from the start of the requested local day
+ * to the end of the last searched day. Used to load bookings in one query.
+ */
+export function alternativesWindow(
+  requestedStart: Date,
+  timeZone: string,
+  searchDays: number,
+): Period {
+  const firstDay = toLocalDateTime(requestedStart, timeZone).startOf('day');
+  const afterLastDay = firstDay.plus({ days: searchDays + 1 });
+  return Period.between(firstDay.toJSDate(), afterLastDay.toJSDate());
+}
+
+/**
  * The first `count` available starts at or after the requested start (so rounded up to
  * the next step), scanning the rest of the requested day and up to `searchDays` more days.
  */

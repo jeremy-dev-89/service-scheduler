@@ -1,5 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { nextCandidatePair } from '../domain/allocation';
+import { alternativesWindow, findAlternatives } from '../domain/availability';
 import {
   BeyondBookingHorizonError,
   CustomerNotFoundError,
@@ -16,7 +17,7 @@ import {
   VehicleNotFoundError,
   VehicleNotOwnedByCustomerError,
 } from '../domain/errors';
-import { fitsWithinOpeningHours, toLocalClock } from '../domain/opening-hours';
+import { fitsWithinOpeningHours, formatLocal, toLocalClock } from '../domain/opening-hours';
 import { Period } from '../domain/period';
 import type { Appointment, Dealership, ServiceType, Vehicle } from '../domain/types';
 import {
@@ -176,7 +177,49 @@ export class BookAppointmentUseCase {
       `No qualified technician and service bay are both free from ` +
         `${toLocalClock(period.start, dealership.timeZone)} to ` +
         `${toLocalClock(period.end, dealership.timeZone)} (${dealership.timeZone}).`,
+      await this.alternatives(dealership, serviceType, vehicle.id, period),
     );
+  }
+
+  /** Other starts that would work, as local ISO times; never shifts the request (AS7). */
+  private async alternatives(
+    dealership: Dealership,
+    serviceType: ServiceType,
+    vehicleId: string,
+    period: Period,
+  ): Promise<string[]> {
+    const { alternativesCount, alternativesSearchDays, slotStepMinutes } = this.policy;
+    const window = alternativesWindow(period.start, dealership.timeZone, alternativesSearchDays);
+    const [bays, technicians, bookings, vehicleBusy] = await Promise.all([
+      this.scheduling.listBays(dealership.id),
+      this.scheduling.listQualifiedTechnicians(
+        dealership.id,
+        serviceType.requiredQualificationCode,
+      ),
+      this.scheduling.findConfirmedBookings(dealership.id, window),
+      this.scheduling.findVehicleBusyPeriods(vehicleId, window),
+    ]);
+    const now = this.clock.now();
+
+    return findAlternatives({
+      requestedStart: period.start,
+      weeklyHours: dealership.openingHours,
+      timeZone: dealership.timeZone,
+      durationMinutes: serviceType.durationMinutes,
+      stepMinutes: slotStepMinutes,
+      bayIds: bays.map((bay) => bay.id),
+      technicianIds: technicians.map((technician) => technician.id),
+      bookings,
+      vehicleBusy,
+      now,
+      latestStart: this.latestStart(now),
+      count: alternativesCount,
+      searchDays: alternativesSearchDays,
+    }).map(formatLocal);
+  }
+
+  private latestStart(now: Date): Date {
+    return new Date(now.getTime() + this.policy.horizonDays * MS_PER_DAY);
   }
 
   private async loadContext(command: BookAppointmentCommand): Promise<ResolvedContext> {
@@ -196,12 +239,12 @@ export class BookAppointmentUseCase {
   }
 
   private assertBookableTime(period: Period, dealership: Dealership): void {
-    const now = this.clock.now().getTime();
+    const now = this.clock.now();
     const start = period.start.getTime();
-    if (start <= now) {
+    if (start <= now.getTime()) {
       throw new StartInPastError();
     }
-    if (start > now + this.policy.horizonDays * MS_PER_DAY) {
+    if (start > this.latestStart(now).getTime()) {
       throw new BeyondBookingHorizonError(this.policy.horizonDays);
     }
     if (!fitsWithinOpeningHours(period, dealership.openingHours, dealership.timeZone)) {
