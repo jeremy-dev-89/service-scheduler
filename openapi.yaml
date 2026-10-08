@@ -1,0 +1,822 @@
+openapi: 3.0.0
+paths:
+  /appointments:
+    post:
+      description: Confirms the appointment only if a service bay and a qualified technician are both free for the whole service duration. The requested start is never shifted.
+      operationId: AppointmentsController_create
+      parameters:
+        - name: X-Request-Id
+          in: header
+          description: Correlation ID; generated when absent and echoed in the response
+          required: false
+          schema:
+            type: string
+        - name: Idempotency-Key
+          in: header
+          description: 1–128 characters. Repeating a request with the same key and body returns the stored appointment with 200 instead of booking again.
+          required: false
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateAppointmentDto"
+      responses:
+        "200":
+          description: Replay of an earlier request with the same Idempotency-Key and body
+          headers:
+            Idempotent-Replayed:
+              schema:
+                type: string
+                enum:
+                  - "true"
+            Location:
+              description: URL of the appointment
+              schema:
+                type: string
+            X-Request-Id:
+              description: Echo of the request ID
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AppointmentResponse"
+        "201":
+          description: Appointment confirmed
+          headers:
+            Location:
+              description: URL of the new appointment
+              schema:
+                type: string
+            X-Request-Id:
+              description: Echo of the request ID
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AppointmentResponse"
+        "400":
+          description: VALIDATION_FAILED
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetailsDto"
+              examples:
+                VALIDATION_FAILED:
+                  value:
+                    type: /problems/validation-failed
+                    title: Request validation failed
+                    status: 400
+                    code: VALIDATION_FAILED
+                    detail: The request is not valid.
+                    instance: /appointments
+                    requestId: c0a8f3e2-7d4b-4c1a-9f0e-5b6a7c8d9e0f
+                    errors:
+                      - field: startsAt
+                        message: startsAt must be an ISO 8601 date-time with an explicit offset or Z, for example 2026-10-20T09:00:00+01:00
+        "404":
+          description: DEALERSHIP_NOT_FOUND, CUSTOMER_NOT_FOUND, VEHICLE_NOT_FOUND, SERVICE_TYPE_NOT_FOUND
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetailsDto"
+              examples:
+                DEALERSHIP_NOT_FOUND:
+                  value:
+                    type: /problems/dealership-not-found
+                    title: Dealership not found
+                    status: 404
+                    code: DEALERSHIP_NOT_FOUND
+                    detail: Dealership 8b1f0c2e-0000-4000-8000-000000000009 does not exist.
+                    instance: /appointments
+                    requestId: c0a8f3e2-7d4b-4c1a-9f0e-5b6a7c8d9e0f
+                CUSTOMER_NOT_FOUND:
+                  value:
+                    type: /problems/customer-not-found
+                    title: Customer not found
+                    status: 404
+                    code: CUSTOMER_NOT_FOUND
+                    detail: Customer 8b1f0c2e-0000-4000-8000-000000000109 does not exist.
+                    instance: /appointments
+                    requestId: c0a8f3e2-7d4b-4c1a-9f0e-5b6a7c8d9e0f
+                VEHICLE_NOT_FOUND:
+                  value:
+                    type: /problems/vehicle-not-found
+                    title: Vehicle not found
+                    status: 404
+                    code: VEHICLE_NOT_FOUND
+                    detail: Vehicle 8b1f0c2e-0000-4000-8000-000000000209 does not exist.
+                    instance: /appointments
+                    requestId: c0a8f3e2-7d4b-4c1a-9f0e-5b6a7c8d9e0f
+                SERVICE_TYPE_NOT_FOUND:
+                  value:
+                    type: /problems/service-type-not-found
+                    title: Service type not found
+                    status: 404
+                    code: SERVICE_TYPE_NOT_FOUND
+                    detail: Service type 8b1f0c2e-0000-4000-8000-000000000309 does not exist.
+                    instance: /appointments
+                    requestId: c0a8f3e2-7d4b-4c1a-9f0e-5b6a7c8d9e0f
+        "409":
+          description: SLOT_UNAVAILABLE, VEHICLE_ALREADY_BOOKED
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetailsDto"
+              examples:
+                SLOT_UNAVAILABLE:
+                  value:
+                    type: /problems/slot-unavailable
+                    title: Requested slot is unavailable
+                    status: 409
+                    code: SLOT_UNAVAILABLE
+                    detail: No qualified technician and service bay are both free from 09:00 to 11:00 (Europe/London).
+                    instance: /appointments
+                    requestId: c0a8f3e2-7d4b-4c1a-9f0e-5b6a7c8d9e0f
+                    alternatives:
+                      - 2026-10-20T11:00:00+01:00
+                      - 2026-10-20T11:15:00+01:00
+                      - 2026-10-20T11:30:00+01:00
+                VEHICLE_ALREADY_BOOKED:
+                  value:
+                    type: /problems/vehicle-already-booked
+                    title: Vehicle already booked
+                    status: 409
+                    code: VEHICLE_ALREADY_BOOKED
+                    detail: Vehicle 8b1f0c2e-0000-4000-8000-000000000201 already has an appointment that overlaps this period.
+                    instance: /appointments
+                    requestId: c0a8f3e2-7d4b-4c1a-9f0e-5b6a7c8d9e0f
+        "422":
+          description: VEHICLE_NOT_OWNED_BY_CUSTOMER, START_IN_PAST, BEYOND_BOOKING_HORIZON, OUTSIDE_OPENING_HOURS, IDEMPOTENCY_KEY_REUSED
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetailsDto"
+              examples:
+                VEHICLE_NOT_OWNED_BY_CUSTOMER:
+                  value:
+                    type: /problems/vehicle-not-owned-by-customer
+                    title: Vehicle does not belong to the customer
+                    status: 422
+                    code: VEHICLE_NOT_OWNED_BY_CUSTOMER
+                    detail: Vehicle 8b1f0c2e-0000-4000-8000-000000000202 does not belong to customer 8b1f0c2e-0000-4000-8000-000000000101.
+                    instance: /appointments
+                    requestId: c0a8f3e2-7d4b-4c1a-9f0e-5b6a7c8d9e0f
+                START_IN_PAST:
+                  value:
+                    type: /problems/start-in-past
+                    title: Start time is not in the future
+                    status: 422
+                    code: START_IN_PAST
+                    detail: The requested start time is not in the future.
+                    instance: /appointments
+                    requestId: c0a8f3e2-7d4b-4c1a-9f0e-5b6a7c8d9e0f
+                BEYOND_BOOKING_HORIZON:
+                  value:
+                    type: /problems/beyond-booking-horizon
+                    title: Start time is beyond the booking horizon
+                    status: 422
+                    code: BEYOND_BOOKING_HORIZON
+                    detail: Appointments can be booked at most 90 days ahead.
+                    instance: /appointments
+                    requestId: c0a8f3e2-7d4b-4c1a-9f0e-5b6a7c8d9e0f
+                OUTSIDE_OPENING_HOURS:
+                  value:
+                    type: /problems/outside-opening-hours
+                    title: Outside opening hours
+                    status: 422
+                    code: OUTSIDE_OPENING_HOURS
+                    detail: The period 17:00 to 19:00 (Europe/London) is not within the dealership's opening hours on that day.
+                    instance: /appointments
+                    requestId: c0a8f3e2-7d4b-4c1a-9f0e-5b6a7c8d9e0f
+                IDEMPOTENCY_KEY_REUSED:
+                  value:
+                    type: /problems/idempotency-key-reused
+                    title: Idempotency key reused with a different body
+                    status: 422
+                    code: IDEMPOTENCY_KEY_REUSED
+                    detail: This Idempotency-Key was already used with a different request body.
+                    instance: /appointments
+                    requestId: c0a8f3e2-7d4b-4c1a-9f0e-5b6a7c8d9e0f
+        "500":
+          description: INTERNAL_ERROR
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetailsDto"
+              examples:
+                INTERNAL_ERROR:
+                  value:
+                    type: /problems/internal-error
+                    title: Internal server error
+                    status: 500
+                    code: INTERNAL_ERROR
+                    detail: An unexpected error occurred.
+                    instance: /appointments
+                    requestId: c0a8f3e2-7d4b-4c1a-9f0e-5b6a7c8d9e0f
+      summary: Book a service appointment
+      tags:
+        - appointments
+  /appointments/{id}/cancel:
+    post:
+      description: Frees the bay, technician and vehicle for the period. Cancelling a cancelled appointment returns it unchanged.
+      operationId: AppointmentsController_cancel
+      parameters:
+        - name: X-Request-Id
+          in: header
+          description: Correlation ID; generated when absent and echoed in the response
+          required: false
+          schema:
+            type: string
+        - name: id
+          required: true
+          in: path
+          schema:
+            format: uuid
+            type: string
+      responses:
+        "200":
+          description: The cancelled appointment
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AppointmentResponse"
+        "400":
+          description: VALIDATION_FAILED
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetailsDto"
+              examples:
+                VALIDATION_FAILED:
+                  value:
+                    type: /problems/validation-failed
+                    title: Request validation failed
+                    status: 400
+                    code: VALIDATION_FAILED
+                    detail: The request is not valid.
+                    instance: /appointments/{id}/cancel
+                    requestId: c0a8f3e2-7d4b-4c1a-9f0e-5b6a7c8d9e0f
+                    errors:
+                      - field: startsAt
+                        message: startsAt must be an ISO 8601 date-time with an explicit offset or Z, for example 2026-10-20T09:00:00+01:00
+        "404":
+          description: APPOINTMENT_NOT_FOUND
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetailsDto"
+              examples:
+                APPOINTMENT_NOT_FOUND:
+                  value:
+                    type: /problems/appointment-not-found
+                    title: Appointment not found
+                    status: 404
+                    code: APPOINTMENT_NOT_FOUND
+                    detail: Appointment 0f6c1d7e-3a52-4b8e-9c1f-2d4e5f6a7b8c does not exist.
+                    instance: /appointments/{id}/cancel
+                    requestId: c0a8f3e2-7d4b-4c1a-9f0e-5b6a7c8d9e0f
+        "500":
+          description: INTERNAL_ERROR
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetailsDto"
+              examples:
+                INTERNAL_ERROR:
+                  value:
+                    type: /problems/internal-error
+                    title: Internal server error
+                    status: 500
+                    code: INTERNAL_ERROR
+                    detail: An unexpected error occurred.
+                    instance: /appointments/{id}/cancel
+                    requestId: c0a8f3e2-7d4b-4c1a-9f0e-5b6a7c8d9e0f
+      summary: Cancel an appointment
+      tags:
+        - appointments
+  /appointments/{id}:
+    get:
+      operationId: AppointmentsController_findOne
+      parameters:
+        - name: X-Request-Id
+          in: header
+          description: Correlation ID; generated when absent and echoed in the response
+          required: false
+          schema:
+            type: string
+        - name: id
+          required: true
+          in: path
+          schema:
+            format: uuid
+            type: string
+      responses:
+        "200":
+          description: ""
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AppointmentResponse"
+        "400":
+          description: VALIDATION_FAILED
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetailsDto"
+              examples:
+                VALIDATION_FAILED:
+                  value:
+                    type: /problems/validation-failed
+                    title: Request validation failed
+                    status: 400
+                    code: VALIDATION_FAILED
+                    detail: The request is not valid.
+                    instance: /appointments/{id}
+                    requestId: c0a8f3e2-7d4b-4c1a-9f0e-5b6a7c8d9e0f
+                    errors:
+                      - field: startsAt
+                        message: startsAt must be an ISO 8601 date-time with an explicit offset or Z, for example 2026-10-20T09:00:00+01:00
+        "404":
+          description: APPOINTMENT_NOT_FOUND
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetailsDto"
+              examples:
+                APPOINTMENT_NOT_FOUND:
+                  value:
+                    type: /problems/appointment-not-found
+                    title: Appointment not found
+                    status: 404
+                    code: APPOINTMENT_NOT_FOUND
+                    detail: Appointment 0f6c1d7e-3a52-4b8e-9c1f-2d4e5f6a7b8c does not exist.
+                    instance: /appointments/{id}
+                    requestId: c0a8f3e2-7d4b-4c1a-9f0e-5b6a7c8d9e0f
+        "500":
+          description: INTERNAL_ERROR
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetailsDto"
+              examples:
+                INTERNAL_ERROR:
+                  value:
+                    type: /problems/internal-error
+                    title: Internal server error
+                    status: 500
+                    code: INTERNAL_ERROR
+                    detail: An unexpected error occurred.
+                    instance: /appointments/{id}
+                    requestId: c0a8f3e2-7d4b-4c1a-9f0e-5b6a7c8d9e0f
+      summary: Read an appointment
+      tags:
+        - appointments
+  /dealerships/{dealershipId}/availability:
+    get:
+      description: "Every SLOT_STEP_MINUTES from opening time while the service still ends by closing time, keeping starts when a bay and a qualified technician are both free. A snapshot: booking a listed start can still return 409 if someone else books it first."
+      operationId: AvailabilityController_availability
+      parameters:
+        - name: dealershipId
+          required: true
+          in: path
+          schema:
+            format: uuid
+            type: string
+        - name: serviceTypeId
+          required: true
+          in: query
+          schema:
+            format: uuid
+            example: 8b1f0c2e-0000-4000-8000-000000000302
+            type: string
+        - name: date
+          required: true
+          in: query
+          description: Local date in the dealership time zone
+          schema:
+            format: date
+            example: 2026-10-20
+            type: string
+      responses:
+        "200":
+          description: ""
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AvailabilityResponse"
+        "400":
+          description: VALIDATION_FAILED
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetailsDto"
+              examples:
+                VALIDATION_FAILED:
+                  value:
+                    type: /problems/validation-failed
+                    title: Request validation failed
+                    status: 400
+                    code: VALIDATION_FAILED
+                    detail: The request is not valid.
+                    instance: /dealerships/{dealershipId}/availability
+                    requestId: c0a8f3e2-7d4b-4c1a-9f0e-5b6a7c8d9e0f
+                    errors:
+                      - field: startsAt
+                        message: startsAt must be an ISO 8601 date-time with an explicit offset or Z, for example 2026-10-20T09:00:00+01:00
+        "404":
+          description: DEALERSHIP_NOT_FOUND, SERVICE_TYPE_NOT_FOUND
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetailsDto"
+              examples:
+                DEALERSHIP_NOT_FOUND:
+                  value:
+                    type: /problems/dealership-not-found
+                    title: Dealership not found
+                    status: 404
+                    code: DEALERSHIP_NOT_FOUND
+                    detail: Dealership 8b1f0c2e-0000-4000-8000-000000000009 does not exist.
+                    instance: /dealerships/{dealershipId}/availability
+                    requestId: c0a8f3e2-7d4b-4c1a-9f0e-5b6a7c8d9e0f
+                SERVICE_TYPE_NOT_FOUND:
+                  value:
+                    type: /problems/service-type-not-found
+                    title: Service type not found
+                    status: 404
+                    code: SERVICE_TYPE_NOT_FOUND
+                    detail: Service type 8b1f0c2e-0000-4000-8000-000000000309 does not exist.
+                    instance: /dealerships/{dealershipId}/availability
+                    requestId: c0a8f3e2-7d4b-4c1a-9f0e-5b6a7c8d9e0f
+        "500":
+          description: INTERNAL_ERROR
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetailsDto"
+              examples:
+                INTERNAL_ERROR:
+                  value:
+                    type: /problems/internal-error
+                    title: Internal server error
+                    status: 500
+                    code: INTERNAL_ERROR
+                    detail: An unexpected error occurred.
+                    instance: /dealerships/{dealershipId}/availability
+                    requestId: c0a8f3e2-7d4b-4c1a-9f0e-5b6a7c8d9e0f
+      summary: Free start times for a service on a local date
+      tags:
+        - availability
+  /health/live:
+    get:
+      operationId: HealthController_live
+      parameters: []
+      responses:
+        "200":
+          description: ""
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+      summary: "Liveness: the process is running"
+      tags:
+        - operations
+  /health/ready:
+    get:
+      operationId: HealthController_ready
+      parameters: []
+      responses:
+        "200":
+          description: ""
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+        "503":
+          description: Database unreachable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+      summary: "Readiness: the database answers SELECT 1 within one second"
+      tags:
+        - operations
+info:
+  title: Unified Service Scheduler
+  description: Books a service bay and a qualified technician for the whole service duration (Keyloop Technical Assessment, Scenario A). Times are ISO 8601; requests must carry an explicit offset. Errors are RFC 9457 problem details with a stable `code`.
+  version: 1.0.0
+  contact: {}
+tags:
+  - name: appointments
+    description: Book, read and cancel service appointments
+  - name: availability
+    description: Free start times for a service on a local date
+  - name: operations
+    description: Health checks and metrics
+servers: []
+components:
+  schemas:
+    ValidationIssueDto:
+      type: object
+      properties:
+        field:
+          type: string
+          example: startsAt
+        message:
+          type: string
+          example: startsAt must be an ISO 8601 date-time with an explicit offset or Z, for example 2026-10-20T09:00:00+01:00
+      required:
+        - field
+        - message
+    ProblemDetailsDto:
+      type: object
+      properties:
+        type:
+          type: string
+          example: /problems/slot-unavailable
+        title:
+          type: string
+          example: Requested slot is unavailable
+        status:
+          type: number
+          example: 409
+        code:
+          type: string
+          example: SLOT_UNAVAILABLE
+          description: Stable code for clients to switch on
+        detail:
+          type: string
+          example: No qualified technician and service bay are both free from 09:00 to 11:00 (Europe/London).
+        instance:
+          type: string
+          example: /appointments
+        requestId:
+          type: string
+          example: c0a8f3e2-7d4b-4c1a-9f0e-5b6a7c8d9e0f
+        errors:
+          description: Only for VALIDATION_FAILED
+          type: array
+          items:
+            $ref: "#/components/schemas/ValidationIssueDto"
+        alternatives:
+          example:
+            - 2026-10-20T11:00:00+01:00
+            - 2026-10-20T11:15:00+01:00
+          description: "Only for SLOT_UNAVAILABLE: other local start times that are free"
+          type: array
+          items:
+            type: string
+      required:
+        - type
+        - title
+        - status
+        - code
+        - detail
+        - instance
+        - requestId
+    CreateAppointmentDto:
+      type: object
+      properties:
+        dealershipId:
+          type: string
+          format: uuid
+          example: 8b1f0c2e-0000-4000-8000-000000000001
+        customerId:
+          type: string
+          format: uuid
+          example: 8b1f0c2e-0000-4000-8000-000000000101
+        vehicleId:
+          type: string
+          format: uuid
+          example: 8b1f0c2e-0000-4000-8000-000000000201
+          description: Must belong to the customer
+        serviceTypeId:
+          type: string
+          format: uuid
+          example: 8b1f0c2e-0000-4000-8000-000000000302
+        startsAt:
+          type: string
+          format: date-time
+          example: 2026-10-20T09:00:00+01:00
+          description: "Requested start, ISO 8601 with an explicit offset or Z. The time is never shifted: if it is not free the answer is 409 with alternatives."
+      required:
+        - dealershipId
+        - customerId
+        - vehicleId
+        - serviceTypeId
+        - startsAt
+    DealershipSummary:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: 8b1f0c2e-0000-4000-8000-000000000001
+        name:
+          type: string
+          example: Northside Motors
+        timeZone:
+          type: string
+          example: Europe/London
+          description: IANA time zone of the dealership
+      required:
+        - id
+        - name
+        - timeZone
+    CustomerSummary:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: 8b1f0c2e-0000-4000-8000-000000000101
+        fullName:
+          type: string
+          example: Sam Carter
+          description: "Only the name: no contact details"
+      required:
+        - id
+        - fullName
+    VehicleSummary:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: 8b1f0c2e-0000-4000-8000-000000000201
+        vin:
+          type: string
+          example: SEEDVHC0000000001
+        make:
+          type: string
+          example: Ford
+        model:
+          type: string
+          example: Focus
+      required:
+        - id
+        - vin
+        - make
+        - model
+    ServiceTypeSummary:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: 8b1f0c2e-0000-4000-8000-000000000302
+        code:
+          type: string
+          example: BRAKE_REPLACEMENT
+        name:
+          type: string
+          example: Brake replacement
+        durationMinutes:
+          type: number
+          example: 120
+      required:
+        - id
+        - code
+        - name
+        - durationMinutes
+    ServiceBaySummary:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: 8b1f0c2e-0000-4000-8000-000000000401
+        name:
+          type: string
+          example: Bay 1
+      required:
+        - id
+        - name
+    TechnicianSummary:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: 8b1f0c2e-0000-4000-8000-000000000501
+        name:
+          type: string
+          example: Alex Morgan
+      required:
+        - id
+        - name
+    AppointmentResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: 0f6c1d7e-3a52-4b8e-9c1f-2d4e5f6a7b8c
+        status:
+          type: string
+          enum:
+            - CONFIRMED
+            - CANCELLED
+          example: CONFIRMED
+        startsAt:
+          type: string
+          format: date-time
+          example: 2026-10-20T08:00:00.000Z
+          description: UTC
+        endsAt:
+          type: string
+          format: date-time
+          example: 2026-10-20T10:00:00.000Z
+          description: UTC; the period is half-open [startsAt, endsAt)
+        localStartsAt:
+          type: string
+          format: date-time
+          example: 2026-10-20T09:00:00+01:00
+          description: startsAt in the dealership time zone
+        localEndsAt:
+          type: string
+          format: date-time
+          example: 2026-10-20T11:00:00+01:00
+          description: endsAt in the dealership time zone
+        dealership:
+          $ref: "#/components/schemas/DealershipSummary"
+        customer:
+          $ref: "#/components/schemas/CustomerSummary"
+        vehicle:
+          $ref: "#/components/schemas/VehicleSummary"
+        serviceType:
+          $ref: "#/components/schemas/ServiceTypeSummary"
+        serviceBay:
+          $ref: "#/components/schemas/ServiceBaySummary"
+        technician:
+          $ref: "#/components/schemas/TechnicianSummary"
+        createdAt:
+          type: string
+          format: date-time
+          example: 2026-10-08T14:03:12.000Z
+      required:
+        - id
+        - status
+        - startsAt
+        - endsAt
+        - localStartsAt
+        - localEndsAt
+        - dealership
+        - customer
+        - vehicle
+        - serviceType
+        - serviceBay
+        - technician
+        - createdAt
+    AvailabilityResponse:
+      type: object
+      properties:
+        dealershipId:
+          type: string
+          format: uuid
+          example: 8b1f0c2e-0000-4000-8000-000000000001
+        serviceTypeId:
+          type: string
+          format: uuid
+          example: 8b1f0c2e-0000-4000-8000-000000000302
+        date:
+          type: string
+          format: date
+          example: 2026-10-20
+        timeZone:
+          type: string
+          example: Europe/London
+        slotStepMinutes:
+          type: number
+          example: 15
+        availableStarts:
+          example:
+            - 2026-10-20T08:00:00+01:00
+            - 2026-10-20T08:15:00+01:00
+          description: Local start times with the offset for that day; empty on a closed day
+          type: array
+          items:
+            type: string
+      required:
+        - dealershipId
+        - serviceTypeId
+        - date
+        - timeZone
+        - slotStepMinutes
+        - availableStarts
+    HealthStatus:
+      type: object
+      properties:
+        status:
+          type: string
+          enum:
+            - ok
+            - unavailable
+          example: ok
+      required:
+        - status

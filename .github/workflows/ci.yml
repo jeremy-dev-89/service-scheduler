@@ -28,6 +28,9 @@ jobs:
       - run: npm run typecheck
       - run: npm run build
 
+      - name: OpenAPI contract has not drifted from the code
+        run: npm run openapi:export && git diff --exit-code openapi.yaml
+
       - name: Pull the PostgreSQL image used by Testcontainers
         run: docker pull postgres:17
 
