@@ -44,8 +44,12 @@ import {
   type SchedulingRepository,
 } from './ports';
 
-/** Upper bound of the random pause before retrying an aborted insert, per retry. */
-const RETRY_JITTER_MS = 50;
+/** Backoff before retrying an aborted insert: full jitter, 25 ms doubling, capped. */
+const RETRY_BACKOFF_BASE_MS = 25;
+const RETRY_BACKOFF_CAP_MS = 400;
+
+const retryBackoffMs = (abortedSoFar: number): number =>
+  Math.random() * Math.min(RETRY_BACKOFF_CAP_MS, RETRY_BACKOFF_BASE_MS * 2 ** abortedSoFar);
 
 const pause = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -228,7 +232,7 @@ export class BookAppointmentUseCase {
         if (error instanceof TransientInsertError) {
           // Aborted while waiting on another insert (deadlock victim or lock timeout):
           // nothing was written and nothing was decided. Several requests are often
-          // aborted together, so wait a random moment to stop them colliding again, and
+          // aborted together, so back off for a random moment so they stop colliding, and
           // re-read the candidates so pairs already taken are skipped without an insert.
           // Bounded separately so aborts never turn into a false 409.
           aborted += 1;
@@ -236,7 +240,7 @@ export class BookAppointmentUseCase {
             throw error;
           }
           progress.retries += 1;
-          await pause(Math.random() * RETRY_JITTER_MS * aborted);
+          await pause(retryBackoffMs(aborted));
           candidates = await this.freeCandidates(dealership, serviceType, period);
           continue;
         }

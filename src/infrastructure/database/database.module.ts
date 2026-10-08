@@ -18,11 +18,13 @@ const READY_TIMEOUT_MS = 1_000;
 
 /**
  * Upper bound on any lock wait. Concurrent conflicting inserts into the GiST exclusion
- * indexes wait on each other; PostgreSQL usually breaks such deadlocks after
- * deadlock_timeout (1 s), but under heavy contention a wait was seen to last minutes.
- * The aborted insert is retried by the booking use case (TransientInsertError).
+ * indexes wait on each other; PostgreSQL breaks such deadlocks after deadlock_timeout
+ * (1 s) by aborting one victim per cycle, but under heavy contention a wait was seen to
+ * last minutes. Five seconds leaves the detector room to untangle cycles one victim at a
+ * time before this aborts every waiter. The booking use case retries an aborted insert
+ * (TransientInsertError).
  */
-const LOCK_TIMEOUT_MS = 2_000;
+const LOCK_TIMEOUT_MS = 5_000;
 
 export function createKysely(databaseUrl: string, poolMax: number): Kysely<Database> {
   const pool = new Pool({
