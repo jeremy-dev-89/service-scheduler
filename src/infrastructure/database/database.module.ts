@@ -17,15 +17,14 @@ export const KYSELY = Symbol('Kysely');
 const READY_TIMEOUT_MS = 1_000;
 
 /**
- * Upper bound on any lock wait. An exclusion constraint check that finds a conflicting row
- * from an in-progress insert waits for that insert to finish. Concurrent conflicting
- * inserts can wait on each other; PostgreSQL usually breaks the cycle after
- * deadlock_timeout (1 s), but under contention a tangle was seen to last minutes. An
- * honest insert commits in milliseconds, so a short wait is enough: past it the insert is
- * aborted (55P03), the booking use case backs off and retries (TransientInsertError), and
- * the retry sees the other insert committed and gets a normal 23P01 at once.
+ * Backstop for lock waits. An exclusion constraint check that finds a conflicting row from
+ * an in-progress insert waits for that insert; concurrent conflicting inserts can wait on
+ * each other. PostgreSQL's deadlock detector aborts one victim per cycle after
+ * deadlock_timeout, which docker-compose.yml and the test database set to 50 ms (ADR-001).
+ * Once, under heavy contention, a wait was seen to last minutes; this bounds it. Either
+ * way the aborted insert is retried by the booking use case (TransientInsertError).
  */
-const LOCK_TIMEOUT_MS = 250;
+const LOCK_TIMEOUT_MS = 2_000;
 
 export function createKysely(databaseUrl: string, poolMax: number): Kysely<Database> {
   const pool = new Pool({
