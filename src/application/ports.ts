@@ -117,3 +117,50 @@ export interface AppointmentRepository {
 }
 
 export const APPOINTMENT_REPOSITORY = Symbol('AppointmentRepository');
+
+/** Booking rules that come from configuration. */
+export interface BookingPolicy {
+  /** Latest bookable start, in days after now (AS11). */
+  readonly horizonDays: number;
+  /** Insert attempts before answering 409 SLOT_UNAVAILABLE. */
+  readonly maxAttempts: number;
+  /** Step between suggested starts, in minutes (AS16). */
+  readonly slotStepMinutes: number;
+  /** Alternatives offered in a 409 response. */
+  readonly alternativesCount: number;
+  /** Days after the requested day scanned for alternatives. */
+  readonly alternativesSearchDays: number;
+}
+
+export const BOOKING_POLICY = Symbol('BookingPolicy');
+
+export type BookingOutcome =
+  'confirmed' | 'slot_unavailable' | 'vehicle_already_booked' | 'invalid' | 'not_found' | 'error';
+
+/** One booking decision, recorded once per POST /appointments. IDs only, no personal data. */
+export interface BookingDecision {
+  readonly outcome: BookingOutcome;
+  readonly errorCode?: string;
+  readonly retries: number;
+  readonly dealershipId: string;
+  readonly serviceTypeId: string;
+  readonly appointmentId?: string;
+  readonly durationMs: number;
+}
+
+export type SpanAttributes = Record<string, string | number | boolean>;
+
+/** Metrics, the decision log line and trace spans for bookings. */
+export interface BookingTelemetry {
+  /** Runs `work` inside a trace span; `setAttributes` adds attributes once they are known. */
+  span<T>(
+    name: string,
+    attributes: SpanAttributes,
+    work: (setAttributes: (attributes: SpanAttributes) => void) => Promise<T>,
+  ): Promise<T>;
+  /** An insert lost a race on this resource and the next pair will be tried. */
+  conflictRetry(resource: 'bay' | 'technician'): void;
+  bookingDecided(decision: BookingDecision): void;
+}
+
+export const BOOKING_TELEMETRY = Symbol('BookingTelemetry');

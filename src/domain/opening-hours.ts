@@ -22,6 +22,11 @@ export function toLocalIso(instant: Date, timeZone: string): string {
   return formatLocal(toLocalDateTime(instant, timeZone));
 }
 
+/** Local wall-clock time "HH:mm", for human-readable messages. */
+export function toLocalClock(instant: Date, timeZone: string): string {
+  return toLocalDateTime(instant, timeZone).toFormat('HH:mm');
+}
+
 export function hoursForWeekday(
   weeklyHours: WeeklyOpeningHours,
   isoDayOfWeek: number,
