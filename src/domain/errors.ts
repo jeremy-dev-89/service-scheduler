@@ -181,13 +181,14 @@ export class IdempotencyKeyConflictError extends Error {
 }
 
 /**
- * PostgreSQL chose this insert as a deadlock victim. Two concurrent inserts that conflict
- * on an exclusion constraint can each wait for the other; one is aborted and wrote
- * nothing, so the same insert can simply be tried again.
+ * PostgreSQL aborted the insert before it decided anything: it was chosen as a deadlock
+ * victim (40P01), or a lock wait outlived lock_timeout (55P03). Concurrent inserts that
+ * conflict on an exclusion constraint can wait on each other. Nothing was written, so the
+ * same insert can simply be tried again.
  */
-export class InsertDeadlockError extends Error {
+export class TransientInsertError extends Error {
   constructor(options?: ErrorOptions) {
-    super('The insert was aborted to resolve a deadlock; nothing was written.', options);
-    this.name = 'InsertDeadlockError';
+    super('The insert was aborted while waiting for another insert; nothing was written.', options);
+    this.name = 'TransientInsertError';
   }
 }

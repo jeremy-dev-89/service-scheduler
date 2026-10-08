@@ -11,7 +11,7 @@ import type {
 } from '../../src/application/ports';
 import {
   IdempotencyKeyConflictError,
-  InsertDeadlockError,
+  TransientInsertError,
   ResourceConflictError,
 } from '../../src/domain/errors';
 import type { Period } from '../../src/domain/period';
@@ -201,7 +201,7 @@ describe('BookAppointmentUseCase retry loop', () => {
   });
 
   it('retries the same pair after a deadlock, without counting a resource conflict', async () => {
-    const t = setup([new InsertDeadlockError(), 'ok']);
+    const t = setup([new TransientInsertError(), 'ok']);
 
     await t.book();
 
@@ -220,7 +220,7 @@ describe('BookAppointmentUseCase retry loop', () => {
 
   it('stops after BOOKING_MAX_ATTEMPTS inserts even if pairs remain', async () => {
     const t = setup(
-      Array.from({ length: 10 }, () => new InsertDeadlockError()),
+      Array.from({ length: 10 }, () => new TransientInsertError()),
       {
         maxAttempts: 3,
       },

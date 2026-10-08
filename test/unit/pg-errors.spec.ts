@@ -1,6 +1,6 @@
 import {
   IdempotencyKeyConflictError,
-  InsertDeadlockError,
+  TransientInsertError,
   InternalIntegrityError,
   ResourceConflictError,
 } from '../../src/domain/errors';
@@ -27,9 +27,12 @@ describe('mapAppointmentWriteError', () => {
     ).toBeInstanceOf(IdempotencyKeyConflictError);
   });
 
-  it('maps 40P01 to a retryable deadlock error', () => {
-    expect(mapAppointmentWriteError(pgError('40P01'))).toBeInstanceOf(InsertDeadlockError);
-  });
+  it.each(['40P01', '55P03'])(
+    'maps %s (deadlock victim, lock timeout) to a retryable error',
+    (code) => {
+      expect(mapAppointmentWriteError(pgError(code))).toBeInstanceOf(TransientInsertError);
+    },
+  );
 
   it('maps 23503 to an internal integrity error', () => {
     expect(

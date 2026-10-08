@@ -16,11 +16,20 @@ export const KYSELY = Symbol('Kysely');
 
 const READY_TIMEOUT_MS = 1_000;
 
+/**
+ * Upper bound on any lock wait. Concurrent conflicting inserts into the GiST exclusion
+ * indexes wait on each other; PostgreSQL usually breaks such deadlocks after
+ * deadlock_timeout (1 s), but under heavy contention a wait was seen to last minutes.
+ * The aborted insert is retried by the booking use case (TransientInsertError).
+ */
+const LOCK_TIMEOUT_MS = 2_000;
+
 export function createKysely(databaseUrl: string, poolMax: number): Kysely<Database> {
   const pool = new Pool({
     connectionString: databaseUrl,
     max: poolMax,
     connectionTimeoutMillis: 5_000,
+    lock_timeout: LOCK_TIMEOUT_MS,
   });
   // An idle client can lose its connection (database restart, network blip). Without a
   // listener, pg re-emits that as an unhandled 'error' event and the process crashes.
