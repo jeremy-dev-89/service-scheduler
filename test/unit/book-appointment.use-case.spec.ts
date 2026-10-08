@@ -200,14 +200,24 @@ describe('BookAppointmentUseCase retry loop', () => {
     expect(t.telemetry.decisions[0]).toMatchObject({ outcome: 'vehicle_already_booked' });
   });
 
-  it('retries the same pair after a deadlock, without counting a resource conflict', async () => {
+  it('retries after an aborted insert, re-reading candidates, without counting a resource conflict', async () => {
     const t = setup([new TransientInsertError(), 'ok']);
 
     await t.book();
 
     expect(t.pairs()).toEqual(['t1/b1', 't1/b1']);
+    expect(t.scheduling.findFreeBays).toHaveBeenCalledTimes(2);
     expect(t.telemetry.retries).toEqual([]);
     expect(t.telemetry.decisions[0]).toMatchObject({ outcome: 'confirmed', retries: 1 });
+  });
+
+  it('skips a pair that was taken while it waited, without another insert on it', async () => {
+    const t = setup([new TransientInsertError(), 'ok']);
+    t.scheduling.findFreeBays.mockResolvedValueOnce(bays).mockResolvedValueOnce([bays[1]!]);
+
+    await t.book();
+
+    expect(t.pairs()).toEqual(['t1/b1', 't1/b2']);
   });
 
   it('answers SLOT_UNAVAILABLE once no pair is left', async () => {
@@ -218,16 +228,22 @@ describe('BookAppointmentUseCase retry loop', () => {
     expect(t.telemetry.decisions[0]).toMatchObject({ outcome: 'slot_unavailable', retries: 3 });
   });
 
-  it('stops after BOOKING_MAX_ATTEMPTS inserts even if pairs remain', async () => {
-    const t = setup(
-      Array.from({ length: 10 }, () => new TransientInsertError()),
-      {
-        maxAttempts: 3,
-      },
-    );
+  it('stops after BOOKING_MAX_ATTEMPTS lost races even if a pair remains', async () => {
+    const t = setup([bayTaken(), technicianTaken()], { maxAttempts: 2 });
 
     await expect(t.book()).rejects.toMatchObject({ code: 'SLOT_UNAVAILABLE' });
-    expect(t.appointments.inserts).toHaveLength(3);
+    expect(t.pairs()).toEqual(['t1/b1', 't1/b2']);
+  });
+
+  it('gives up with an error after BOOKING_MAX_ATTEMPTS aborted inserts, never a false 409', async () => {
+    const t = setup(
+      Array.from({ length: 10 }, () => new TransientInsertError()),
+      { maxAttempts: 3 },
+    );
+
+    await expect(t.book()).rejects.toBeInstanceOf(TransientInsertError);
+    expect(t.appointments.inserts).toHaveLength(4);
+    expect(t.telemetry.decisions[0]).toMatchObject({ outcome: 'error' });
   });
 
   it('does not insert when the vehicle fast path finds an overlap', async () => {

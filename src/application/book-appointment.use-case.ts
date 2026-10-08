@@ -21,7 +21,14 @@ import {
 } from '../domain/errors';
 import { fitsWithinOpeningHours, formatLocal, toLocalClock } from '../domain/opening-hours';
 import { Period } from '../domain/period';
-import type { Appointment, Dealership, ServiceType, Vehicle } from '../domain/types';
+import type {
+  Appointment,
+  Dealership,
+  ServiceBay,
+  ServiceType,
+  Technician,
+  Vehicle,
+} from '../domain/types';
 import {
   APPOINTMENT_REPOSITORY,
   type AppointmentRepository,
@@ -36,6 +43,11 @@ import {
   SCHEDULING_REPOSITORY,
   type SchedulingRepository,
 } from './ports';
+
+/** Upper bound of the random pause before retrying an aborted insert, per retry. */
+const RETRY_JITTER_MS = 50;
+
+const pause = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 export interface BookAppointmentCommand {
   readonly dealershipId: string;
@@ -169,27 +181,27 @@ export class BookAppointmentUseCase {
     }
 
     // 7. Candidates that look free right now, in first-fit order (AS9).
-    const [technicians, bays] = await Promise.all([
-      this.scheduling.findFreeQualifiedTechnicians(
-        dealership.id,
-        serviceType.requiredQualificationCode,
-        period,
-      ),
-      this.scheduling.findFreeBays(dealership.id, period),
-    ]);
+    let candidates = await this.freeCandidates(dealership, serviceType, period);
 
     // 8. Try pairs until an insert succeeds; each lost race excludes one resource.
     const excludedTechnicians = new Set<string>();
     const excludedBays = new Set<string>();
-    for (let attempt = 1; attempt <= this.policy.maxAttempts; attempt += 1) {
-      const pair = nextCandidatePair(technicians, bays, excludedTechnicians, excludedBays);
+    let decided = 0;
+    let aborted = 0;
+    while (decided < this.policy.maxAttempts) {
+      const pair = nextCandidatePair(
+        candidates.technicians,
+        candidates.bays,
+        excludedTechnicians,
+        excludedBays,
+      );
       if (!pair) {
         break;
       }
       try {
         const appointmentId = await this.telemetry.span(
           'booking.insert_attempt',
-          { attempt },
+          { attempt: decided + aborted + 1 },
           async (setAttributes) => {
             try {
               const id = await this.appointments.insertConfirmed({
@@ -214,9 +226,18 @@ export class BookAppointmentUseCase {
         return { appointment: await this.loadAppointment(appointmentId), replayed: false };
       } catch (error) {
         if (error instanceof TransientInsertError) {
-          // Aborted while waiting (deadlock or lock timeout): nothing was written, so try
-          // the same pair again. The constraint still decides who wins.
+          // Aborted while waiting on another insert (deadlock victim or lock timeout):
+          // nothing was written and nothing was decided. Several requests are often
+          // aborted together, so wait a random moment to stop them colliding again, and
+          // re-read the candidates so pairs already taken are skipped without an insert.
+          // Bounded separately so aborts never turn into a false 409.
+          aborted += 1;
+          if (aborted > this.policy.maxAttempts) {
+            throw error;
+          }
           progress.retries += 1;
+          await pause(Math.random() * RETRY_JITTER_MS * aborted);
+          candidates = await this.freeCandidates(dealership, serviceType, period);
           continue;
         }
         if (!(error instanceof ResourceConflictError)) {
@@ -225,6 +246,7 @@ export class BookAppointmentUseCase {
         if (error.resource === 'vehicle') {
           throw new VehicleAlreadyBookedError(vehicle.id);
         }
+        decided += 1;
         if (error.resource === 'bay') {
           excludedBays.add(pair.bay.id);
         } else {
@@ -242,6 +264,23 @@ export class BookAppointmentUseCase {
         `${toLocalClock(period.end, dealership.timeZone)} (${dealership.timeZone}).`,
       await this.alternatives(dealership, serviceType, vehicle.id, period),
     );
+  }
+
+  /** Qualified technicians and bays with no CONFIRMED overlap, by name then id. */
+  private async freeCandidates(
+    dealership: Dealership,
+    serviceType: ServiceType,
+    period: Period,
+  ): Promise<{ technicians: Technician[]; bays: ServiceBay[] }> {
+    const [technicians, bays] = await Promise.all([
+      this.scheduling.findFreeQualifiedTechnicians(
+        dealership.id,
+        serviceType.requiredQualificationCode,
+        period,
+      ),
+      this.scheduling.findFreeBays(dealership.id, period),
+    ]);
+    return { technicians, bays };
   }
 
   /** Other starts that would work, as local ISO times; never shifts the request (AS7). */
