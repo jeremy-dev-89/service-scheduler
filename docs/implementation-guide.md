@@ -331,7 +331,8 @@ CREATE INDEX technician_qualification_code_idx ON technician_qualification (qual
 
 - Insert with the Kysely template `` sql`tstzrange(${startsAt}, ${endsAt}, '[)')`  ``, passing both bounds as `Date` values.
 - Read with `lower(period) AS starts_at` and `upper(period) AS ends_at`; never parse the range string.
-- Map SQLSTATE in `pg-errors.ts`: `23P01` exclusion violation (use `error.constraint` to tell bay, technician or vehicle apart), `23505` unique violation (idempotency key), `23503` foreign key violation.
+- Map SQLSTATE in `pg-errors.ts`: `23P01` exclusion violation (use `error.constraint` to tell bay, technician or vehicle apart), `23505` unique violation (idempotency key), `23503` foreign key violation, and `40P01` / `55P03` (deadlock victim, lock timeout) as a retryable abort.
+- The booking insert is `INSERT … ON CONFLICT DO NOTHING` (changed 8 Oct 2026 after stress testing, see ADR-001): a lost race returns no row, and the repository reads which committed row holds the idempotency key, vehicle, bay or technician. The 23P01 and 23505 mappings remain for any other writer.
 
 ### Seed data
 
@@ -447,7 +448,7 @@ The seed UUIDs above are illustrative; the real ones live in `seed/ids.ts`.
 
 ## Booking algorithm and concurrency
 
-Reads find candidates without locks; the INSERT is the decision. If an exclusion constraint rejects the insert, another request won that resource, so the use case excludes it and tries the next pair, a bounded number of times.
+Reads find candidates without locks; the INSERT is the decision. It is `INSERT … ON CONFLICT DO NOTHING` with the exclusion constraints and the idempotency index as arbiters: PostgreSQL's speculative insertion keeps racing inserts from deadlocking (a plain INSERT livelocked under the CT tests; see ADR-001). If the insert writes nothing, another request won that resource, so the use case excludes it and tries the next pair, a bounded number of times.
 
 ```mermaid
 sequenceDiagram
@@ -472,8 +473,9 @@ sequenceDiagram
     R->>DB: INSERT appointment
     alt success
       DB-->>R: new row
-    else 23P01 on bay or technician constraint
-      DB-->>R: exclusion_violation
+    else conflict: no row inserted
+      DB-->>R: 0 rows (ON CONFLICT DO NOTHING)
+      R->>DB: SELECT which resource is taken
       R-->>UC: ResourceConflict
       UC->>D: Exclude that resource, take next pair
     end
@@ -508,16 +510,19 @@ bookAppointment(command, idempotencyKey?)
        pair = nextCandidatePair(technicians, bays, excludedTechnicians, excludedBays)
        if no pair: stop
        try insertConfirmed(command, pair, period)        -> 201 Created
-       on 23P01 appointment_no_bay_overlap               -> add bay to excludedBays
-       on 23P01 appointment_no_technician_overlap        -> add technician to excludedTechnicians
-       on 23P01 appointment_no_vehicle_overlap           -> 409 VEHICLE_ALREADY_BOOKED
-       on 23505 appointment_idempotency_key_uq           -> go back to step 0
+       (INSERT … ON CONFLICT DO NOTHING; on 0 rows the repository reads what is taken)
+       idempotency key taken                             -> go back to step 0
+       vehicle taken                                     -> 409 VEHICLE_ALREADY_BOOKED
+       bay taken                                         -> add bay to excludedBays
+       technician taken                                  -> add technician to excludedTechnicians
+       aborted (40P01 deadlock victim, 55P03 timeout)    -> back off with jitter, re-read
+                                                            candidates, retry (own bound of 15)
   9. 409 SLOT_UNAVAILABLE, with alternatives if that SHOULD is built
 ```
 
 Rules Claude must keep:
 
-- Each insert is a single autocommit statement: no `SELECT … FOR UPDATE`, no advisory locks, no SERIALIZABLE.
+- Each insert is a single autocommit statement: no `SELECT … FOR UPDATE`, no advisory locks, no SERIALIZABLE. It is `INSERT … ON CONFLICT DO NOTHING`, and the pool sets `lock_timeout = 2s` as a backstop.
 - Steps 6 and 7 are optimisations. The constraints are the guarantee, which is why CT-01 to CT-03 exist.
 - Every retry increments `booking_conflict_retries_total{resource}`.
 - `nextCandidatePair` is a pure domain function: first technician not excluded, paired with first bay not excluded.
@@ -637,7 +642,7 @@ Every test is named by its ID (for example `it('AT-A2-03 rejects …')`) so the 
 | IT-04 | Back-to-back rows on the same bay and technician succeed |
 | IT-05 | A row overlapping a CANCELLED row succeeds |
 | IT-06 | A bay from another dealership fails with `23503` on `appointment_bay_same_dealership` |
-| IT-07 | The repository maps each `23P01` to a domain conflict naming the right resource |
+| IT-07 | The repository maps each lost race (no row inserted) to a domain conflict naming the right resource |
 | IT-08 | A period with an inclusive upper bound violates `appointment_period_half_open` |
 | IT-09 | Candidate queries return only free, qualified technicians and free bays, ordered by name then ID |
 
@@ -1004,7 +1009,7 @@ Prompt: `/step 7`
 
 1. `application/ports.ts`: `SchedulingRepository` (booking context, free qualified technicians, free bays, vehicle overlap, day appointments), `AppointmentRepository` (insert confirmed, find by ID, find by idempotency key, cancel) and `Clock`.
 2. Kysely implementations in `infrastructure/repositories`. Candidate queries use `NOT EXISTS` against CONFIRMED appointments whose `period` overlaps (`&&`) a `'[)'` range, ordered by name then ID.
-3. `pg-errors.ts`: `23P01` mapped by constraint name to a bay, technician or vehicle conflict; `23505` on the idempotency index to an idempotency conflict; `23503` to an internal integrity error.
+3. `pg-errors.ts`: `23P01` mapped by constraint name to a bay, technician or vehicle conflict; `23505` on the idempotency index to an idempotency conflict; `23503` to an internal integrity error; `40P01` and `55P03` to a retryable abort. The booking insert itself uses `ON CONFLICT DO NOTHING` and attributes a lost race with a follow-up read (see Booking algorithm).
 4. Integration tests IT-01 to IT-09.
 
 Done when:

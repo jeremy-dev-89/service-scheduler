@@ -71,7 +71,7 @@ describe('Kysely repositories', () => {
       ['technician', 'appointment_no_technician_overlap', 'sameTechnician'],
       ['vehicle', 'appointment_no_vehicle_overlap', 'sameVehicle'],
     ] as const)(
-      'IT-07 maps a 23P01 on the %s constraint to a ResourceConflictError naming that resource',
+      'IT-07 maps a lost race on the %s constraint to a ResourceConflictError naming that resource',
       async (resource, constraint, clash) => {
         const w = await world();
         await appointments.insertConfirmed(w.booking());
@@ -89,7 +89,7 @@ describe('Kysely repositories', () => {
       },
     );
 
-    it('maps a 23505 on the idempotency key index to an IdempotencyKeyConflictError', async () => {
+    it('maps a lost race on the idempotency key to an IdempotencyKeyConflictError', async () => {
       const w = await world();
       await appointments.insertConfirmed(
         w.booking({ idempotencyKey: 'key-1', idempotencyFingerprint: 'f' }),

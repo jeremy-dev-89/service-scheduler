@@ -31,7 +31,9 @@ export function isPgError(error: unknown): error is Error & PgError {
 }
 
 /**
- * Turns a database error from an appointment write into a domain error.
+ * Turns a database error from an appointment write into a domain error. The booking
+ * insert uses ON CONFLICT DO NOTHING, so constraint conflicts normally arrive as "0 rows"
+ * instead; the 23P01 and 23505 mappings remain for any other writer of the table.
  * Errors it does not recognise are returned unchanged.
  */
 export function mapAppointmentWriteError(error: unknown): unknown {
@@ -51,9 +53,8 @@ export function mapAppointmentWriteError(error: unknown): unknown {
         : error;
     case DEADLOCK_DETECTED:
     case LOCK_NOT_AVAILABLE:
-      // Concurrent conflicting inserts into the GiST exclusion indexes can wait on each
-      // other. PostgreSQL aborts one as a deadlock victim, or lock_timeout ends a wait the
-      // detector missed. Nothing was written, so it is safe to try again.
+      // The statement was aborted while waiting on another transaction (deadlock victim,
+      // or lock_timeout). Nothing was written, so it is safe to try again.
       return new TransientInsertError({ cause: error });
     case FOREIGN_KEY_VIOLATION:
       return new InternalIntegrityError(`Foreign key ${constraint} rejected the appointment.`, {

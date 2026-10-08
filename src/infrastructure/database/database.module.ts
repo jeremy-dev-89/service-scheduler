@@ -17,12 +17,10 @@ export const KYSELY = Symbol('Kysely');
 const READY_TIMEOUT_MS = 1_000;
 
 /**
- * Backstop for lock waits. An exclusion constraint check that finds a conflicting row from
- * an in-progress insert waits for that insert; concurrent conflicting inserts can wait on
- * each other. PostgreSQL's deadlock detector aborts one victim per cycle after
- * deadlock_timeout, which docker-compose.yml and the test database set to 50 ms (ADR-001).
- * Once, under heavy contention, a wait was seen to last minutes; this bounds it. Either
- * way the aborted insert is retried by the booking use case (TransientInsertError).
+ * Backstop for lock waits. Appointment inserts use ON CONFLICT DO NOTHING, whose
+ * speculative insertion keeps racing inserts from waiting on each other (ADR-001); an
+ * honest wait lasts milliseconds. If a wait ever outlives this, the statement is aborted
+ * (55P03) and the booking use case retries it (TransientInsertError).
  */
 const LOCK_TIMEOUT_MS = 2_000;
 

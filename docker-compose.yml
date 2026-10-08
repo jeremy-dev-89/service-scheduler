@@ -3,8 +3,6 @@ name: unified-service-scheduler
 services:
   db:
     image: postgres:17
-    # Break deadlocks between racing appointment inserts in 50 ms instead of 1 s (ADR-001).
-    command: ['postgres', '-c', 'deadlock_timeout=50ms']
     environment:
       # Local development defaults only; never use these credentials outside your machine.
       POSTGRES_USER: scheduler

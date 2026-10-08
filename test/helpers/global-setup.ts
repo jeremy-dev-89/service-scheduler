@@ -17,10 +17,7 @@ export default async function globalSetup(): Promise<void> {
   if (process.env.TEST_DATABASE_URL) {
     process.env.DATABASE_URL = process.env.TEST_DATABASE_URL;
   } else {
-    // Same server setting as docker-compose.yml: fast deadlock detection (ADR-001).
-    const container = await new PostgreSqlContainer('postgres:17')
-      .withCommand(['postgres', '-c', 'deadlock_timeout=50ms'])
-      .start();
+    const container = await new PostgreSqlContainer('postgres:17').start();
     testState.container = container;
     process.env.DATABASE_URL = container.getConnectionUri();
   }

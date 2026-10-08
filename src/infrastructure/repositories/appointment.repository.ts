@@ -5,21 +5,33 @@ import type {
   IdempotencyRecord,
   NewAppointment,
 } from '../../application/ports';
+import {
+  IdempotencyKeyConflictError,
+  ResourceConflictError,
+  TransientInsertError,
+} from '../../domain/errors';
 import { Period } from '../../domain/period';
 import type { Appointment } from '../../domain/types';
 import { KYSELY } from '../database/database.module';
 import type { Database } from '../database/database.types';
 import { mapAppointmentWriteError } from './pg-errors';
+import { overlaps } from './scheduling.repository';
 
 @Injectable()
 export class KyselyAppointmentRepository implements AppointmentRepository {
   constructor(@Inject(KYSELY) private readonly db: Kysely<Database>) {}
 
-  /** One autocommit INSERT: no transaction, no locks. The exclusion constraints decide. */
+  /**
+   * One autocommit INSERT … ON CONFLICT DO NOTHING: no transaction, no locks. The exclusion
+   * constraints and the idempotency index are the arbiters, so the database decides.
+   * Speculative insertion makes racing inserts deadlock-free (ADR-001). When the insert
+   * loses it writes nothing, and a follow-up read says which resource was taken.
+   */
   async insertConfirmed(appointment: NewAppointment): Promise<string> {
     const { start, end } = appointment.period;
+    let row: { id: string } | undefined;
     try {
-      const row = await this.db
+      row = await this.db
         .insertInto('appointment')
         .values({
           dealership_id: appointment.dealershipId,
@@ -33,12 +45,61 @@ export class KyselyAppointmentRepository implements AppointmentRepository {
           idempotency_key: appointment.idempotencyKey ?? null,
           idempotency_fingerprint: appointment.idempotencyFingerprint ?? null,
         })
+        .onConflict((oc) => oc.doNothing())
         .returning('id')
-        .executeTakeFirstOrThrow();
-      return row.id;
+        .executeTakeFirst();
     } catch (error) {
       throw mapAppointmentWriteError(error);
     }
+    if (row) {
+      return row.id;
+    }
+    throw await this.lostRace(appointment);
+  }
+
+  /**
+   * The insert did nothing: a committed row holds the idempotency key or overlaps on the
+   * vehicle, bay or technician. Reports the most decisive one. If none is found, the
+   * winning row was cancelled in the meantime and the insert can simply be tried again.
+   */
+  private async lostRace(appointment: NewAppointment): Promise<Error> {
+    const confirmedOverlap = (
+      column: 'vehicle_id' | 'service_bay_id' | 'technician_id',
+      id: string,
+    ) =>
+      this.db
+        .selectFrom('appointment as a')
+        .select(sql<number>`1`.as('one'))
+        .where(`a.${column}`, '=', id)
+        .where('a.status', '=', 'CONFIRMED')
+        .where(overlaps('a.period', appointment.period));
+
+    const taken = await this.db
+      .selectNoFrom((eb) => [
+        appointment.idempotencyKey === undefined
+          ? sql<boolean>`false`.as('key')
+          : eb
+              .exists(
+                eb
+                  .selectFrom('appointment')
+                  .select(sql<number>`1`.as('one'))
+                  .where('idempotency_key', '=', appointment.idempotencyKey),
+              )
+              .as('key'),
+        eb.exists(confirmedOverlap('vehicle_id', appointment.vehicleId)).as('vehicle'),
+        eb.exists(confirmedOverlap('service_bay_id', appointment.serviceBayId)).as('bay'),
+        eb.exists(confirmedOverlap('technician_id', appointment.technicianId)).as('technician'),
+      ])
+      .executeTakeFirstOrThrow();
+
+    if (taken.key) return new IdempotencyKeyConflictError();
+    if (taken.vehicle)
+      return new ResourceConflictError('vehicle', 'appointment_no_vehicle_overlap');
+    if (taken.bay) return new ResourceConflictError('bay', 'appointment_no_bay_overlap');
+    if (taken.technician) {
+      return new ResourceConflictError('technician', 'appointment_no_technician_overlap');
+    }
+    return new TransientInsertError();
   }
 
   async findById(appointmentId: string): Promise<Appointment | undefined> {

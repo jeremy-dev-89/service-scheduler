@@ -47,8 +47,9 @@ sequenceDiagram
     R->>DB: INSERT appointment
     alt success
       DB-->>R: new row
-    else 23P01 on bay or technician constraint
-      DB-->>R: exclusion_violation
+    else conflict: no row inserted
+      DB-->>R: 0 rows (ON CONFLICT DO NOTHING)
+      R->>DB: SELECT which resource is taken
       R-->>UC: ResourceConflict
       UC->>D: Exclude that resource, take next pair
     end
