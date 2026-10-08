@@ -21,3 +21,11 @@ coverage/
 # OS and editor files
 .DS_Store
 .idea/
+
+# Project
+dist
+coverage
+reports
+.env
+.claude/tests-unlocked
+.stryker-tmp/
