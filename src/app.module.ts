@@ -7,6 +7,7 @@ import { ProblemDetailsFilter } from './api/problem-details.filter';
 import { RequestIdMiddleware } from './api/request-id';
 import { createValidationPipe } from './api/validation.pipe';
 import { BookAppointmentUseCase } from './application/book-appointment.use-case';
+import { CancelAppointmentUseCase } from './application/cancel-appointment.use-case';
 import { GetAppointmentQuery } from './application/get-appointment.query';
 import { GetAvailabilityQuery } from './application/get-availability.query';
 import {
@@ -48,6 +49,7 @@ import { KyselySchedulingRepository } from './infrastructure/repositories/schedu
     MetricsRegistry,
     { provide: BOOKING_TELEMETRY, useClass: ObservabilityBookingTelemetry },
     BookAppointmentUseCase,
+    CancelAppointmentUseCase,
     GetAppointmentQuery,
     GetAvailabilityQuery,
     { provide: APP_PIPE, useFactory: createValidationPipe },

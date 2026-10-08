@@ -1,6 +1,7 @@
 import { Body, Controller, Get, HttpCode, HttpStatus, Param, Post, Res } from '@nestjs/common';
 import type { Response } from 'express';
 import { BookAppointmentUseCase } from '../application/book-appointment.use-case';
+import { CancelAppointmentUseCase } from '../application/cancel-appointment.use-case';
 import { GetAppointmentQuery } from '../application/get-appointment.query';
 import { type AppointmentResponse, toAppointmentResponse } from './dto/appointment.response';
 import { CreateAppointmentDto } from './dto/create-appointment.dto';
@@ -11,6 +12,7 @@ export class AppointmentsController {
   constructor(
     private readonly bookAppointment: BookAppointmentUseCase,
     private readonly getAppointment: GetAppointmentQuery,
+    private readonly cancelAppointment: CancelAppointmentUseCase,
   ) {}
 
   /** A1 + A2: books a bay and a qualified technician for the whole service. */
@@ -30,6 +32,13 @@ export class AppointmentsController {
     });
     res.setHeader('Location', `/appointments/${appointment.id}`);
     return toAppointmentResponse(appointment);
+  }
+
+  /** Cancels the appointment and frees its resources. Idempotent. */
+  @Post(':id/cancel')
+  @HttpCode(HttpStatus.OK)
+  async cancel(@Param('id', uuidParam('id')) id: string): Promise<AppointmentResponse> {
+    return toAppointmentResponse(await this.cancelAppointment.execute(id));
   }
 
   /** A3: the persisted appointment record. */
