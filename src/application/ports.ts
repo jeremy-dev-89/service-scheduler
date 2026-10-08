@@ -10,3 +10,10 @@ export class SystemClock implements Clock {
     return new Date();
   }
 }
+
+/** Answers whether the service can reach its dependencies. */
+export interface ReadinessCheck {
+  isReady(): Promise<boolean>;
+}
+
+export const READINESS_CHECK = Symbol('ReadinessCheck');

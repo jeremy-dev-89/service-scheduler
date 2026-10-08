@@ -1,0 +1,34 @@
+name: unified-service-scheduler
+
+services:
+  db:
+    image: postgres:17
+    environment:
+      # Local development defaults only; never use these credentials outside your machine.
+      POSTGRES_USER: scheduler
+      POSTGRES_PASSWORD: scheduler
+      POSTGRES_DB: scheduler
+    ports:
+      - '${DB_HOST_PORT:-5432}:5432'
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U scheduler -d scheduler']
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  api:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://scheduler:scheduler@db:5432/scheduler
+      PORT: 3000
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    ports:
+      - '${API_HOST_PORT:-3000}:3000'
+
+volumes:
+  db-data:

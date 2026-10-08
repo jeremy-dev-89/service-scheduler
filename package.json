@@ -20,8 +20,8 @@
     "test:integration": "jest --selectProjects integration --runInBand --passWithNoTests",
     "test:acceptance": "jest --selectProjects acceptance --runInBand --passWithNoTests",
     "test:concurrency": "jest --selectProjects concurrency --runInBand --passWithNoTests",
-    "db:migrate": "echo \"db:migrate is added in Step 3\" && exit 1",
-    "db:seed": "echo \"db:seed is added in Step 3\" && exit 1",
+    "db:migrate": "ts-node --transpile-only src/infrastructure/database/migrator.ts",
+    "db:seed": "ts-node --transpile-only src/infrastructure/database/seed/seed.ts",
     "openapi:export": "echo \"openapi:export is added in Step 10\" && exit 1"
   },
   "dependencies": {
@@ -30,6 +30,8 @@
     "@nestjs/platform-express": "11.2.7",
     "class-transformer": "0.5.1",
     "class-validator": "0.15.1",
+    "kysely": "0.28.17",
+    "pg": "8.23.1",
     "reflect-metadata": "0.2.2",
     "rxjs": "7.8.2"
   },
@@ -37,9 +39,11 @@
     "@eslint/js": "9.39.5",
     "@nestjs/cli": "11.0.24",
     "@nestjs/testing": "11.2.7",
+    "@testcontainers/postgresql": "12.2.0",
     "@types/express": "5.0.6",
     "@types/jest": "30.0.0",
     "@types/node": "24.19.1",
+    "@types/pg": "8.23.1",
     "@types/supertest": "7.2.1",
     "eslint": "9.39.5",
     "eslint-config-prettier": "10.1.8",
@@ -48,6 +52,7 @@
     "prettier": "3.9.9",
     "supertest": "7.3.1",
     "ts-jest": "29.4.14",
+    "ts-node": "10.9.2",
     "typescript": "5.9.3",
     "typescript-eslint": "8.71.1"
   }
