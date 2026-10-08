@@ -179,3 +179,15 @@ export class IdempotencyKeyConflictError extends Error {
     this.name = 'IdempotencyKeyConflictError';
   }
 }
+
+/**
+ * PostgreSQL chose this insert as a deadlock victim. Two concurrent inserts that conflict
+ * on an exclusion constraint can each wait for the other; one is aborted and wrote
+ * nothing, so the same insert can simply be tried again.
+ */
+export class InsertDeadlockError extends Error {
+  constructor(options?: ErrorOptions) {
+    super('The insert was aborted to resolve a deadlock; nothing was written.', options);
+    this.name = 'InsertDeadlockError';
+  }
+}

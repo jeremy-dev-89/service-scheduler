@@ -1,6 +1,7 @@
 import {
   type ConflictingResource,
   IdempotencyKeyConflictError,
+  InsertDeadlockError,
   InternalIntegrityError,
   ResourceConflictError,
 } from '../../domain/errors';
@@ -9,6 +10,7 @@ import {
 export const EXCLUSION_VIOLATION = '23P01';
 export const UNIQUE_VIOLATION = '23505';
 export const FOREIGN_KEY_VIOLATION = '23503';
+export const DEADLOCK_DETECTED = '40P01';
 
 const RESOURCE_BY_CONSTRAINT: Readonly<Record<string, ConflictingResource>> = {
   appointment_no_bay_overlap: 'bay',
@@ -46,6 +48,10 @@ export function mapAppointmentWriteError(error: unknown): unknown {
       return constraint === IDEMPOTENCY_KEY_INDEX
         ? new IdempotencyKeyConflictError({ cause: error })
         : error;
+    case DEADLOCK_DETECTED:
+      // Concurrent conflicting inserts into the GiST exclusion indexes can wait on each
+      // other; PostgreSQL aborts one after deadlock_timeout. Safe to try again.
+      return new InsertDeadlockError({ cause: error });
     case FOREIGN_KEY_VIOLATION:
       return new InternalIntegrityError(`Foreign key ${constraint} rejected the appointment.`, {
         cause: error,

@@ -8,6 +8,7 @@ import {
   DomainError,
   IdempotencyKeyConflictError,
   IdempotencyKeyReusedError,
+  InsertDeadlockError,
   InternalIntegrityError,
   OutsideOpeningHoursError,
   ResourceConflictError,
@@ -212,6 +213,11 @@ export class BookAppointmentUseCase {
         );
         return { appointment: await this.loadAppointment(appointmentId), replayed: false };
       } catch (error) {
+        if (error instanceof InsertDeadlockError) {
+          // Nothing was written and nobody won yet: try the same pair again.
+          progress.retries += 1;
+          continue;
+        }
         if (!(error instanceof ResourceConflictError)) {
           throw error;
         }
@@ -359,6 +365,7 @@ function describeFailure(error: unknown): Pick<BookingDecision, 'outcome' | 'err
 
 function insertOutcome(error: unknown): string {
   if (error instanceof ResourceConflictError) return `${error.resource}_conflict`;
+  if (error instanceof InsertDeadlockError) return 'deadlock';
   if (error instanceof IdempotencyKeyConflictError) return 'idempotency_conflict';
   return 'error';
 }
