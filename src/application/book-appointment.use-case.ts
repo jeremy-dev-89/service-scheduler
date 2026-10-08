@@ -7,6 +7,7 @@ import {
   DealershipNotFoundError,
   DomainError,
   IdempotencyKeyConflictError,
+  IdempotencyKeyReusedError,
   InternalIntegrityError,
   OutsideOpeningHoursError,
   ResourceConflictError,
@@ -41,10 +42,18 @@ export interface BookAppointmentCommand {
   readonly vehicleId: string;
   readonly serviceTypeId: string;
   readonly startsAt: Date;
+  /** Present when the caller sent an Idempotency-Key header. */
+  readonly idempotency?: {
+    readonly key: string;
+    /** SHA-256 of the request body as canonical JSON. */
+    readonly fingerprint: string;
+  };
 }
 
 export interface BookingResult {
   readonly appointment: Appointment;
+  /** True when an earlier request with the same idempotency key already booked it. */
+  readonly replayed: boolean;
 }
 
 interface ResolvedContext {
@@ -97,6 +106,53 @@ export class BookAppointmentUseCase {
     command: BookAppointmentCommand,
     progress: { retries: number },
   ): Promise<BookingResult> {
+    const { idempotency } = command;
+    if (!idempotency) {
+      return this.bookNew(command, progress);
+    }
+
+    // 0. A request with this key was already booked: replay it.
+    const earlier = await this.replay(idempotency);
+    if (earlier) {
+      return earlier;
+    }
+    try {
+      return await this.bookNew(command, progress);
+    } catch (error) {
+      // Lost a race to a request with the same key: its row either took the key (23505)
+      // or took the vehicle, bay or technician this request wanted. Go back to step 0.
+      if (
+        error instanceof IdempotencyKeyConflictError ||
+        error instanceof VehicleAlreadyBookedError ||
+        error instanceof SlotUnavailableError
+      ) {
+        const winner = await this.replay(idempotency);
+        if (winner) {
+          return winner;
+        }
+      }
+      throw error;
+    }
+  }
+
+  private async replay(idempotency: {
+    key: string;
+    fingerprint: string;
+  }): Promise<BookingResult | undefined> {
+    const stored = await this.appointments.findByIdempotencyKey(idempotency.key);
+    if (!stored) {
+      return undefined;
+    }
+    if (stored.fingerprint !== idempotency.fingerprint) {
+      throw new IdempotencyKeyReusedError();
+    }
+    return { appointment: await this.loadAppointment(stored.appointmentId), replayed: true };
+  }
+
+  private async bookNew(
+    command: BookAppointmentCommand,
+    progress: { retries: number },
+  ): Promise<BookingResult> {
     // 1–2. Every referenced record exists, and the vehicle belongs to the customer.
     const { dealership, vehicle, serviceType } = await this.loadContext(command);
 
@@ -143,6 +199,8 @@ export class BookAppointmentUseCase {
                 serviceBayId: pair.bay.id,
                 technicianId: pair.technician.id,
                 period,
+                idempotencyKey: command.idempotency?.key,
+                idempotencyFingerprint: command.idempotency?.fingerprint,
               });
               setAttributes({ outcome: 'inserted' });
               return id;
@@ -152,7 +210,7 @@ export class BookAppointmentUseCase {
             }
           },
         );
-        return { appointment: await this.loadAppointment(appointmentId) };
+        return { appointment: await this.loadAppointment(appointmentId), replayed: false };
       } catch (error) {
         if (!(error instanceof ResourceConflictError)) {
           throw error;
