@@ -44,9 +44,17 @@ import {
   type SchedulingRepository,
 } from './ports';
 
-/** Backoff before retrying an aborted insert: full jitter, 25 ms doubling, capped. */
+/**
+ * Retrying after an aborted insert (see TransientInsertError). When many requests race for
+ * one slot, their inserts can all wait on each other and all be aborted together; if they
+ * retry together they collide again. Full-jitter exponential backoff spreads them out until
+ * one insert gets through alone, and the candidate re-read then stops the rest inserting.
+ * The budget is separate from BOOKING_MAX_ATTEMPTS so an abort never becomes a false 409,
+ * and bounds the worst case at roughly 15 × (lock timeout + 1 s).
+ */
+const MAX_ABORTED_INSERTS = 15;
 const RETRY_BACKOFF_BASE_MS = 25;
-const RETRY_BACKOFF_CAP_MS = 400;
+const RETRY_BACKOFF_CAP_MS = 1_000;
 
 const retryBackoffMs = (abortedSoFar: number): number =>
   Math.random() * Math.min(RETRY_BACKOFF_CAP_MS, RETRY_BACKOFF_BASE_MS * 2 ** abortedSoFar);
@@ -231,12 +239,10 @@ export class BookAppointmentUseCase {
       } catch (error) {
         if (error instanceof TransientInsertError) {
           // Aborted while waiting on another insert (deadlock victim or lock timeout):
-          // nothing was written and nothing was decided. Several requests are often
-          // aborted together, so back off for a random moment so they stop colliding, and
-          // re-read the candidates so pairs already taken are skipped without an insert.
-          // Bounded separately so aborts never turn into a false 409.
+          // nothing was written and nothing was decided. Back off, then re-read the
+          // candidates so pairs already taken are skipped without another insert.
           aborted += 1;
-          if (aborted > this.policy.maxAttempts) {
+          if (aborted > MAX_ABORTED_INSERTS) {
             throw error;
           }
           progress.retries += 1;

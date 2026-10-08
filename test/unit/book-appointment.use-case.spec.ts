@@ -162,6 +162,8 @@ const technicianTaken = () =>
 const vehicleTaken = () => new ResourceConflictError('vehicle', 'appointment_no_vehicle_overlap');
 
 describe('BookAppointmentUseCase retry loop', () => {
+  afterEach(() => jest.restoreAllMocks());
+
   it('books the first technician with the first bay when the insert succeeds', async () => {
     const t = setup(['ok']);
 
@@ -235,14 +237,12 @@ describe('BookAppointmentUseCase retry loop', () => {
     expect(t.pairs()).toEqual(['t1/b1', 't1/b2']);
   });
 
-  it('gives up with an error after BOOKING_MAX_ATTEMPTS aborted inserts, never a false 409', async () => {
-    const t = setup(
-      Array.from({ length: 10 }, () => new TransientInsertError()),
-      { maxAttempts: 3 },
-    );
+  it('gives up with an error after 15 aborted inserts, never a false 409', async () => {
+    jest.spyOn(Math, 'random').mockReturnValue(0); // no backoff delay in the unit test
+    const t = setup(Array.from({ length: 20 }, () => new TransientInsertError()));
 
     await expect(t.book()).rejects.toBeInstanceOf(TransientInsertError);
-    expect(t.appointments.inserts).toHaveLength(4);
+    expect(t.appointments.inserts).toHaveLength(16);
     expect(t.telemetry.decisions[0]).toMatchObject({ outcome: 'error' });
   });
 
