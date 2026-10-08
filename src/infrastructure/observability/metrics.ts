@@ -1,12 +1,19 @@
-import { Injectable } from '@nestjs/common';
+import {
+  type CallHandler,
+  type ExecutionContext,
+  Injectable,
+  type NestInterceptor,
+} from '@nestjs/common';
+import type { Request, Response } from 'express';
 import { collectDefaultMetrics, Counter, Histogram, Registry } from 'prom-client';
-import type { BookingOutcome } from '../../application/ports';
+import type { Observable } from 'rxjs';
+import type { BookingOutcome, MetricsExporter } from '../../application/ports';
 
 // Labels never contain IDs, so cardinality stays bounded.
 
 /** One registry per application instance, so tests can create several apps. */
 @Injectable()
-export class MetricsRegistry {
+export class MetricsRegistry implements MetricsExporter {
   readonly registry = new Registry();
 
   readonly bookingRequests = new Counter<'outcome'>({
@@ -61,5 +68,34 @@ export class MetricsRegistry {
 
   render(): Promise<string> {
     return this.registry.metrics();
+  }
+}
+
+/**
+ * Times every routed request. The route label is the Express route template
+ * (/appointments/:id), never the raw URL, so IDs stay out of the labels.
+ */
+@Injectable()
+export class HttpMetricsInterceptor implements NestInterceptor {
+  constructor(private readonly metrics: MetricsRegistry) {}
+
+  intercept(context: ExecutionContext, next: CallHandler): Observable<unknown> {
+    if (context.getType() !== 'http') {
+      return next.handle();
+    }
+    const http = context.switchToHttp();
+    const req = http.getRequest<Request>();
+    const res = http.getResponse<Response>();
+    const stopTimer = this.metrics.httpRequestDuration.startTimer();
+
+    res.once('finish', () => {
+      const routePath = (req.route as { path?: unknown } | undefined)?.path;
+      stopTimer({
+        method: req.method,
+        route: `${req.baseUrl}${typeof routePath === 'string' ? routePath : ''}` || 'unmatched',
+        status_code: String(res.statusCode),
+      });
+    });
+    return next.handle();
   }
 }

@@ -5,11 +5,18 @@ import prettier from 'eslint-config-prettier';
 import globals from 'globals';
 import tseslint from 'typescript-eslint';
 
-const restrict = (message, ...group) => ({
-  'no-restricted-imports': ['error', { patterns: [{ group, message }] }],
+/** Packages by name; our own layers by relative path, e.g. '../infrastructure/x'. */
+const restrict = (message, { packages = [], layers = [] }) => ({
+  'no-restricted-imports': [
+    'error',
+    {
+      patterns: [
+        ...(packages.length > 0 ? [{ group: packages, message }] : []),
+        ...layers.map((name) => ({ regex: `^\\.{1,2}/(.+/)?${name}(/.*)?$`, message })),
+      ],
+    },
+  ],
 });
-
-const layer = (name) => [`**/${name}`, `**/${name}/**`];
 
 export default defineConfig(
   {
@@ -59,42 +66,28 @@ export default defineConfig(
     files: ['src/domain/**/*.ts'],
     rules: restrict(
       'Domain is pure TypeScript plus luxon: no framework, database or other layer imports.',
-      '@nestjs/*',
-      'kysely',
-      'kysely/*',
-      'pg',
-      'pg/*',
-      ...layer('application'),
-      ...layer('infrastructure'),
-      ...layer('api'),
-      ...layer('config'),
+      {
+        packages: ['@nestjs/*', 'kysely', 'kysely/*', 'pg', 'pg/*'],
+        layers: ['application', 'infrastructure', 'api', 'config'],
+      },
     ),
   },
   {
     files: ['src/application/**/*.ts'],
-    rules: restrict(
-      'Application may import the domain, its ports and @nestjs/common only.',
-      'kysely',
-      'kysely/*',
-      'pg',
-      'pg/*',
-      ...layer('infrastructure'),
-      ...layer('api'),
-    ),
+    rules: restrict('Application may import the domain, its ports and @nestjs/common only.', {
+      packages: ['kysely', 'kysely/*', 'pg', 'pg/*'],
+      layers: ['infrastructure', 'api'],
+    }),
   },
   {
     files: ['src/infrastructure/**/*.ts'],
-    rules: restrict('Infrastructure must not import the API layer.', ...layer('api')),
+    rules: restrict('Infrastructure must not import the API layer.', { layers: ['api'] }),
   },
   {
     files: ['src/api/**/*.ts'],
     rules: restrict(
       'The API layer talks to the application layer, never to the database or infrastructure.',
-      'kysely',
-      'kysely/*',
-      'pg',
-      'pg/*',
-      ...layer('infrastructure'),
+      { packages: ['kysely', 'kysely/*', 'pg', 'pg/*'], layers: ['infrastructure'] },
     ),
   },
 );

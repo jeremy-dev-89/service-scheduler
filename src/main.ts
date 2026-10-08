@@ -1,11 +1,16 @@
+// Must stay the first import: starts OpenTelemetry before http, express and pg load.
+import './tracing';
 import { NestFactory } from '@nestjs/core';
 import { SwaggerModule } from '@nestjs/swagger';
+import { Logger } from 'nestjs-pino';
 import { buildOpenApiDocument } from './api/openapi';
 import { AppModule } from './app.module';
 import { APP_CONFIG, type AppConfig } from './config/config.schema';
 
 async function bootstrap(): Promise<void> {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create(AppModule, { bufferLogs: true });
+  app.useLogger(app.get(Logger));
+  // On SIGTERM: destroy the Kysely pool and flush pending trace spans.
   app.enableShutdownHooks();
 
   // Swagger UI at /docs, raw OpenAPI JSON at /docs-json.

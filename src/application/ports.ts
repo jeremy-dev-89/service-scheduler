@@ -164,3 +164,11 @@ export interface BookingTelemetry {
 }
 
 export const BOOKING_TELEMETRY = Symbol('BookingTelemetry');
+
+/** Renders the service's metrics in the Prometheus text format. */
+export interface MetricsExporter {
+  readonly contentType: string;
+  render(): Promise<string>;
+}
+
+export const METRICS_EXPORTER = Symbol('MetricsExporter');

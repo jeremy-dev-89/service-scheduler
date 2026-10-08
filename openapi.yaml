@@ -506,6 +506,20 @@ paths:
       summary: "Readiness: the database answers SELECT 1 within one second"
       tags:
         - operations
+  /metrics:
+    get:
+      operationId: MetricsController_scrape
+      parameters: []
+      responses:
+        "200":
+          description: Prometheus text exposition format
+          content:
+            text/plain:
+              schema:
+                type: string
+      summary: Prometheus metrics
+      tags:
+        - operations
 info:
   title: Unified Service Scheduler
   description: Books a service bay and a qualified technician for the whole service duration (Keyloop Technical Assessment, Scenario A). Times are ISO 8601; requests must carry an explicit offset. Errors are RFC 9457 problem details with a stable `code`.

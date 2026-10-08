@@ -27,9 +27,19 @@ services:
       DATABASE_URL: postgres://scheduler:scheduler@db:5432/scheduler
       PORT: 3000
       LOG_LEVEL: ${LOG_LEVEL:-info}
+      # Spans go to Jaeger when the tracing profile runs; without it they are dropped.
+      OTEL_ENABLED: ${OTEL_ENABLED:-true}
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
     ports:
       - '${API_HOST_PORT:-3000}:3000'
 
+  # docker compose --profile tracing up --build, then open http://localhost:16686
+  jaeger:
+    image: jaegertracing/jaeger:latest
+    profiles: [tracing]
+    ports:
+      - '16686:16686'
+      - '4318:4318'
 
 volumes:
   db-data:
