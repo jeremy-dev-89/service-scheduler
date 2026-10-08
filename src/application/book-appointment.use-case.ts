@@ -1,6 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { nextCandidatePair } from '../domain/allocation';
-import { alternativesWindow, findAlternatives } from '../domain/availability';
+import { alternativesWindow, findAlternatives, latestBookableStart } from '../domain/availability';
 import {
   BeyondBookingHorizonError,
   CustomerNotFoundError,
@@ -34,8 +34,6 @@ import {
   SCHEDULING_REPOSITORY,
   type SchedulingRepository,
 } from './ports';
-
-const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
 export interface BookAppointmentCommand {
   readonly dealershipId: string;
@@ -219,7 +217,7 @@ export class BookAppointmentUseCase {
   }
 
   private latestStart(now: Date): Date {
-    return new Date(now.getTime() + this.policy.horizonDays * MS_PER_DAY);
+    return latestBookableStart(now, this.policy.horizonDays);
   }
 
   private async loadContext(command: BookAppointmentCommand): Promise<ResolvedContext> {

@@ -93,6 +93,29 @@ export interface AlternativesInput extends Omit<AvailableStartsInput, 'date' | '
   readonly searchDays: number;
 }
 
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
+/** The latest start that may be booked (AS11): now plus the horizon in days. */
+export function latestBookableStart(now: Date, horizonDays: number): Date {
+  return new Date(now.getTime() + horizonDays * MS_PER_DAY);
+}
+
+/**
+ * A local calendar date in the dealership's zone, as the UTC instants it spans and its
+ * ISO weekday. Throws on an invalid date or zone.
+ */
+export function localDay(date: string, timeZone: string): { window: Period; isoDayOfWeek: number } {
+  const day = DateTime.fromISO(date, { zone: timeZone });
+  if (!day.isValid) {
+    throw new RangeError(`Invalid date "${date}" or time zone "${timeZone}"`);
+  }
+  const start = day.startOf('day');
+  return {
+    window: Period.between(start.toJSDate(), start.plus({ days: 1 }).toJSDate()),
+    isoDayOfWeek: start.weekday,
+  };
+}
+
 /**
  * The instants `findAlternatives` may look at: from the start of the requested local day
  * to the end of the last searched day. Used to load bookings in one query.

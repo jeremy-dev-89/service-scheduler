@@ -1,12 +1,14 @@
 import { type MiddlewareConsumer, Module, type NestModule } from '@nestjs/common';
 import { APP_FILTER, APP_PIPE } from '@nestjs/core';
 import { AppointmentsController } from './api/appointments.controller';
+import { AvailabilityController } from './api/availability.controller';
 import { HealthController } from './api/health.controller';
 import { ProblemDetailsFilter } from './api/problem-details.filter';
 import { RequestIdMiddleware } from './api/request-id';
 import { createValidationPipe } from './api/validation.pipe';
 import { BookAppointmentUseCase } from './application/book-appointment.use-case';
 import { GetAppointmentQuery } from './application/get-appointment.query';
+import { GetAvailabilityQuery } from './application/get-availability.query';
 import {
   APPOINTMENT_REPOSITORY,
   BOOKING_POLICY,
@@ -27,7 +29,7 @@ import { KyselySchedulingRepository } from './infrastructure/repositories/schedu
 /** Composition root: binds every port to its adapter. */
 @Module({
   imports: [ConfigModule, DatabaseModule],
-  controllers: [AppointmentsController, HealthController],
+  controllers: [AppointmentsController, AvailabilityController, HealthController],
   providers: [
     { provide: CLOCK, useClass: SystemClock },
     {
@@ -47,6 +49,7 @@ import { KyselySchedulingRepository } from './infrastructure/repositories/schedu
     { provide: BOOKING_TELEMETRY, useClass: ObservabilityBookingTelemetry },
     BookAppointmentUseCase,
     GetAppointmentQuery,
+    GetAvailabilityQuery,
     { provide: APP_PIPE, useFactory: createValidationPipe },
     { provide: APP_FILTER, useClass: ProblemDetailsFilter },
   ],

@@ -2,6 +2,8 @@ import {
   type AvailableStartsInput,
   computeAvailableStarts,
   findAlternatives,
+  latestBookableStart,
+  localDay,
 } from '../../src/domain/availability';
 import { formatLocal } from '../../src/domain/opening-hours';
 import { Period } from '../../src/domain/period';
@@ -189,5 +191,26 @@ describe('findAlternatives', () => {
     });
 
     expect(result).toEqual([]);
+  });
+});
+
+describe('localDay and latestBookableStart', () => {
+  it('spans 25 hours on the day the clocks go back, and reports the ISO weekday', () => {
+    const { window, isoDayOfWeek } = localDay('2026-10-25', 'Europe/London');
+
+    expect(window.start).toEqual(new Date('2026-10-24T23:00:00Z'));
+    expect(window.end).toEqual(new Date('2026-10-26T00:00:00Z'));
+    expect(window.durationMinutes).toBe(25 * 60);
+    expect(isoDayOfWeek).toBe(7);
+  });
+
+  it('rejects an impossible date', () => {
+    expect(() => localDay('2026-02-30', 'Europe/London')).toThrow(RangeError);
+  });
+
+  it('puts the latest bookable start a whole number of days after now', () => {
+    expect(latestBookableStart(new Date('2026-10-12T09:00:00Z'), 90)).toEqual(
+      new Date('2027-01-10T09:00:00Z'),
+    );
   });
 });
