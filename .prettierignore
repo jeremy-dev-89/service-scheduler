@@ -1,0 +1,9 @@
+dist
+coverage
+reports
+node_modules
+package-lock.json
+docs/implementation-guide.md
+openapi.yaml
+*.md
+.claude

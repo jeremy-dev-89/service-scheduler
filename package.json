@@ -1,0 +1,54 @@
+{
+  "name": "unified-service-scheduler",
+  "version": "0.1.0",
+  "description": "Service appointment scheduler: books a service bay and a qualified technician for the whole service duration.",
+  "private": true,
+  "license": "UNLICENSED",
+  "engines": {
+    "node": ">=24 <25"
+  },
+  "scripts": {
+    "build": "nest build",
+    "start": "node dist/main.js",
+    "start:dev": "nest start --watch",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "jest --runInBand --passWithNoTests",
+    "test:unit": "jest --selectProjects unit --passWithNoTests",
+    "test:integration": "jest --selectProjects integration --runInBand --passWithNoTests",
+    "test:acceptance": "jest --selectProjects acceptance --runInBand --passWithNoTests",
+    "test:concurrency": "jest --selectProjects concurrency --runInBand --passWithNoTests",
+    "db:migrate": "echo \"db:migrate is added in Step 3\" && exit 1",
+    "db:seed": "echo \"db:seed is added in Step 3\" && exit 1",
+    "openapi:export": "echo \"openapi:export is added in Step 10\" && exit 1"
+  },
+  "dependencies": {
+    "@nestjs/common": "11.2.7",
+    "@nestjs/core": "11.2.7",
+    "@nestjs/platform-express": "11.2.7",
+    "class-transformer": "0.5.1",
+    "class-validator": "0.15.1",
+    "reflect-metadata": "0.2.2",
+    "rxjs": "7.8.2"
+  },
+  "devDependencies": {
+    "@eslint/js": "9.39.5",
+    "@nestjs/cli": "11.0.24",
+    "@nestjs/testing": "11.2.7",
+    "@types/express": "5.0.6",
+    "@types/jest": "30.0.0",
+    "@types/node": "24.19.1",
+    "@types/supertest": "7.2.1",
+    "eslint": "9.39.5",
+    "eslint-config-prettier": "10.1.8",
+    "globals": "17.13.0",
+    "jest": "30.5.2",
+    "prettier": "3.9.9",
+    "supertest": "7.3.1",
+    "ts-jest": "29.4.14",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.71.1"
+  }
+}
