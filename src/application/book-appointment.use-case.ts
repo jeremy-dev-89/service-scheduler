@@ -90,9 +90,10 @@ interface ResolvedContext {
 /**
  * A1 + A2: books a bay and a qualified technician for the whole service duration.
  *
- * Reads find candidates without locks; the INSERT is the decision. When an exclusion
- * constraint rejects the insert, another request won that bay or technician, so it is
- * excluded and the next pair is tried, at most `maxAttempts` times (ADR-001).
+ * Reads find candidates without locks; the INSERT is the decision, with the exclusion
+ * constraints as arbiters. When it loses, another request won that bay or technician, so
+ * that resource is excluded and the next pair is tried, at most `maxAttempts` times
+ * (ADR-001).
  */
 @Injectable()
 export class BookAppointmentUseCase {
@@ -144,8 +145,8 @@ export class BookAppointmentUseCase {
     try {
       return await this.bookNew(command, progress);
     } catch (error) {
-      // Lost a race to a request with the same key: its row either took the key (23505)
-      // or took the vehicle, bay or technician this request wanted. Go back to step 0.
+      // Lost a race to a request with the same key: its row took the key, or the vehicle,
+      // bay or technician this request wanted. Go back to step 0.
       if (
         error instanceof IdempotencyKeyConflictError ||
         error instanceof VehicleAlreadyBookedError ||
