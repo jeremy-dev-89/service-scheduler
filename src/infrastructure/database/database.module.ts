@@ -17,14 +17,15 @@ export const KYSELY = Symbol('Kysely');
 const READY_TIMEOUT_MS = 1_000;
 
 /**
- * Upper bound on any lock wait. Concurrent conflicting inserts into the GiST exclusion
- * indexes wait on each other; PostgreSQL breaks such deadlocks after deadlock_timeout
- * (1 s) by aborting one victim per cycle, but under heavy contention a wait was seen to
- * last minutes. Five seconds leaves the detector room to untangle cycles one victim at a
- * time before this aborts every waiter. The booking use case retries an aborted insert
- * (TransientInsertError).
+ * Upper bound on any lock wait. An exclusion constraint check that finds a conflicting row
+ * from an in-progress insert waits for that insert to finish. Concurrent conflicting
+ * inserts can wait on each other; PostgreSQL usually breaks the cycle after
+ * deadlock_timeout (1 s), but under contention a tangle was seen to last minutes. An
+ * honest insert commits in milliseconds, so a short wait is enough: past it the insert is
+ * aborted (55P03), the booking use case backs off and retries (TransientInsertError), and
+ * the retry sees the other insert committed and gets a normal 23P01 at once.
  */
-const LOCK_TIMEOUT_MS = 5_000;
+const LOCK_TIMEOUT_MS = 250;
 
 export function createKysely(databaseUrl: string, poolMax: number): Kysely<Database> {
   const pool = new Pool({
