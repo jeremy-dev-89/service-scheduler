@@ -2,7 +2,9 @@
 
 A booking service for dealership service appointments (Keyloop Technical Assessment, Scenario A). A request names a vehicle, a service type, a dealership and a start time. The service confirms it only if a service bay **and** a technician qualified for that service type are both free for the **whole** service duration, and it stores the appointment with all its associations. PostgreSQL exclusion constraints make a double booking impossible, even when many requests race for the same slot.
 
-[![CI](https://github.com/OWNER/unified-service-scheduler/actions/workflows/ci.yml/badge.svg)](https://github.com/OWNER/unified-service-scheduler/actions/workflows/ci.yml)
+Of the brief's two options, this is the **backend**: a RESTful API over a persistent PostgreSQL database. The client side is stubbed with an OpenAPI contract and Swagger UI, cURL examples, and a test harness. The [system design document](docs/system-design.md) covers the architecture, components, data flow, technology choices, observability and the use of GenAI in the design.
+
+[![CI](https://github.com/jeremy-dev-89/service-scheduler/actions/workflows/ci.yml/badge.svg)](https://github.com/jeremy-dev-89/service-scheduler/actions/workflows/ci.yml)
 
 Video walkthrough: _link to be added_
 
@@ -99,11 +101,46 @@ More: Swagger UI at `http://localhost:3000/docs` (raw spec at `/docs-json`, comm
 - **Observable.** JSON logs with request IDs and no personal data, Prometheus metrics at `/metrics`, and OpenTelemetry traces.
 - **Stack.** Node.js 24, NestJS 11, PostgreSQL 17, Kysely, Luxon, Jest and Testcontainers ([ADR-002](docs/adr/0002-technology-stack.md)).
 
-## AI Collaboration Narrative
+## AI Collaboration Narrative & Strategy for guiding the AI
 
-<!-- Jeremy: write these four sections in your own words. Material to draw on:
-     docs/ai-collaboration/verification-log.md, key-prompts.md, review-checklist.md,
-     CLAUDE.md, .claude/ (reviewer subagent, /step command, hooks), and git history. -->
+I treated the AI the way I treat a capable engineer joining my team. I owned the problem, the scope and the decisions; the AI produced options, drafts and code; and nothing moved forward until I had reviewed it against the brief.
+
+I used two AI collaborators with separate jobs:
+
+- **Claude (chat)** as a design partner: analysing the four scenarios, proposing the architecture and turning my decisions into written plans.
+- **Claude Code (VS Code)** as the implementer, working only from a written specification, one step at a time.
+
+Keeping planning and building apart meant the implementing agent never had to guess intent. It received a specification, not a conversation.
+
+**1. I set context and constraints; the AI proposed; I decided.**
+I gave the AI the full brief and the recruiter's email. It compared all four scenarios and recommended Scenario A. I accepted because its core is a correctness problem: no bay or technician may be double-booked under concurrent requests. That gives real design depth, and it is exactly where AI-generated code tends to look right but be wrong.
+
+I committed to submitting earlier than the one-week window, so I had the AI re-plan around that date. It split scope into MUST, SHOULD and STRETCH tiers, so time pressure would cut features, never tests or documentation.
+
+**2. I did not trust the first pass.**
+Before any code, I had the AI re-read the brief line by line from the source file instead of relying on its earlier summary, and map every requirement to where it would be satisfied. The traceability matrix covered 37 requirements (31 from the brief, 6 from the email) and found 10 gaps in the first plan. For example:
+
+- The brief asks for a GenAI section in the design document that is separate from this README narrative.
+- The video must cover challenges faced.
+- Customer had to become a first-class entity, because the Appointment record must reference it.
+
+**3. I formalised before delegating.**
+Each stage produced a document I reviewed before the next one started:
+
+strategy → execution playbook (scope, assumptions, risks, five-day plan) → implementation guide (`docs/implementation-guide.md`: schema, API contract, booking algorithm, test cases by ID, 15 build steps) → code.
+
+Where writing the spec exposed ambiguity, the AI flagged new assumptions (AS14–AS16) for my decision instead of choosing silently. [What you decided, e.g. "I accepted the vehicle-overlap constraint (AS14) because a car cannot be in two bays at once."]
+
+**4. I built guardrails the agent must obey, not just read.**
+
+- `CLAUDE.md` defines architecture boundaries, domain rules and hard rules, such as never weakening a test or a database constraint.
+- `/step N` enforces plan first: Claude Code restates the goal, proposes a plan and stops until I approve it.
+- Acceptance and concurrency tests were generated from my test specification before any booking code, reviewed by me, then locked by a pre-edit hook.
+- A read-only reviewer subagent checked each step against a fixed checklist.
+- Every step ended with commands I ran myself and a human checkpoint on the code most likely to be wrong: the constraints, time-zone handling and the retry loop.
+
+**5. I kept an evidence trail.**
+Corrections went into `docs/ai-collaboration/verification-log.md` as they happened, and the prompts that shaped the design are in `key-prompts.md`, so this narrative can be checked against the repository history.
 
 ### Strategy
 

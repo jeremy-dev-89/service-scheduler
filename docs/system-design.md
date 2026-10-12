@@ -12,7 +12,7 @@ A dealership group wants customers (or agents acting for them) to book a service
 | A2 | Before confirming, check a ServiceBay and a qualified Technician are both available for the entire duration | Booking use case + PostgreSQL exclusion constraints |
 | A3 | On success, persist an Appointment associating customer, vehicle, technician and bay | `appointment` table, `GET /appointments/{id}` |
 
-The brief's backend option also asks for a RESTful API, a persistent database, a stubbed client (OpenAPI, cURL, test harness) and attention to scalability, performance, reliability, maintainability and observability.
+**Implementation choice: backend.** The brief offers a backend or a frontend; this submission implements the backend fully as a RESTful API over a persistent PostgreSQL database. The client side is stubbed three ways: an OpenAPI contract with Swagger UI, cURL examples and a scripted test harness (see [Client stubs](#client-stubs)). The design also addresses scalability, performance, reliability, maintainability and observability ([Build for the future](#build-for-the-future)).
 
 ## Assumptions
 
@@ -59,6 +59,28 @@ flowchart LR
 
 `src/app.module.ts` is the composition root: it binds every port (`SchedulingRepository`, `AppointmentRepository`, `Clock`, `BookingPolicy`, `BookingTelemetry`, `ReadinessCheck`, `MetricsExporter`) to its adapter. The application layer therefore never sees Kysely, prom-client, pino or OpenTelemetry, and tests swap adapters freely (for example a `FixedClock`).
 
+### Runtime view
+
+```mermaid
+flowchart LR
+  client["Client stubs<br/>cURL, demo.sh, Swagger UI, REST Client"] -->|HTTP :3000| api
+  subgraph compose["docker compose"]
+    api["api<br/>NestJS on node:24-alpine, non-root<br/>migrate, seed, then serve"]
+    db[("db<br/>postgres:17, volume db-data")]
+    jaeger["jaeger (profile: tracing)<br/>OTLP :4318, UI :16686"]
+  end
+  api -->|SQL, pg pool| db
+  api -.->|OTLP spans| jaeger
+  prom["Any Prometheus"] -.->|scrapes /metrics| api
+```
+
+| Runtime component | Role |
+| --- | --- |
+| `api` container | The stateless service. On start it applies pending migrations and the idempotent seed, then serves HTTP; it runs as the non-root `node` user and reports readiness to Docker's health check. Any number can run behind a load balancer. |
+| `db` container | PostgreSQL 17, the system of record and the no-overlap guarantee (exclusion constraints). Data lives in a named volume. |
+| `jaeger` container | Optional (`--profile tracing`): receives OpenTelemetry spans over OTLP and shows traces. |
+| Prometheus (not bundled) | Any Prometheus can scrape `/metrics`; no IDs in labels keeps cardinality bounded. |
+
 ## Components
 
 | Component | File | Role |
@@ -75,6 +97,53 @@ flowchart LR
 | Repositories | `infrastructure/repositories/*` | Lock-free candidate queries; the booking insert; SQLSTATE mapping |
 | Database | `infrastructure/database/*` | Kysely over a `pg` pool, migration `0001`, idempotent seed, readiness |
 | Observability | `infrastructure/observability/*`, `src/tracing.ts` | pino logs, Prometheus metrics, OpenTelemetry spans |
+| Configuration | `config/config.schema.ts`, `config/config.module.ts` | Every setting from environment variables, validated at startup; the app refuses to start on an invalid value |
+
+### Client stubs
+
+The frontend is not built; three stubs stand in for it:
+
+| Stub | File | Role |
+| --- | --- | --- |
+| API contract | [`openapi.yaml`](../openapi.yaml), Swagger UI at `/docs` | Every endpoint, request and response schema, and every problem+json error with an example per error code. Generated from the code, so CI fails if the committed file drifts. |
+| cURL examples | [README API quick tour](../README.md#api-quick-tour), [`http/booking.http`](../http/booking.http) | Copy-paste requests against the seeded data: book, conflict, read, invalid input, availability, cancel, idempotent retry |
+| Test harness | [`scripts/demo.sh`](../scripts/demo.sh), [`test/acceptance`](../test/acceptance) | `demo.sh` walks the main flow with curl and jq and exits non-zero on any unexpected status; the acceptance suite drives the real app over HTTP for every requirement |
+
+## Data model
+
+One migration (`0001_initial_schema`) creates the schema. Reference data is seeded; appointments are only created through the API.
+
+```mermaid
+erDiagram
+  DEALERSHIP ||--o{ DEALERSHIP_OPENING_HOURS : "opens"
+  DEALERSHIP ||--o{ SERVICE_BAY : "has"
+  DEALERSHIP ||--o{ TECHNICIAN : "employs"
+  TECHNICIAN ||--o{ TECHNICIAN_QUALIFICATION : "holds"
+  QUALIFICATION ||--o{ TECHNICIAN_QUALIFICATION : "granted as"
+  QUALIFICATION ||--o{ SERVICE_TYPE : "required by"
+  CUSTOMER ||--o{ VEHICLE : "owns"
+  DEALERSHIP ||--o{ APPOINTMENT : "at"
+  CUSTOMER ||--o{ APPOINTMENT : "for"
+  VEHICLE ||--o{ APPOINTMENT : "of"
+  SERVICE_TYPE ||--o{ APPOINTMENT : "performs"
+  SERVICE_BAY ||--o{ APPOINTMENT : "in"
+  TECHNICIAN ||--o{ APPOINTMENT : "by"
+  APPOINTMENT {
+    uuid id PK
+    tstzrange period "half-open [start, end), UTC"
+    text status "CONFIRMED or CANCELLED"
+    text idempotency_key "unique when present"
+    timestamptz created_at
+    timestamptz cancelled_at
+  }
+```
+
+The `appointment` row is the persistent record of requirement A3: it references the dealership, customer, vehicle, service type, service bay and technician. Integrity is enforced by the database, not only by the code:
+
+- three partial exclusion constraints (`EXCLUDE USING gist (… WITH =, period WITH &&) WHERE (status = 'CONFIRMED')`) forbid overlapping confirmed bookings per bay, per technician and per vehicle;
+- composite foreign keys `(service_bay_id, dealership_id)` and `(technician_id, dealership_id)` stop an appointment from using a bay or technician of another dealership;
+- check constraints keep every period half-open and finite, and tie `cancelled_at` to the CANCELLED status;
+- a partial unique index on `idempotency_key` makes retried requests safe.
 
 ## Data flow
 
@@ -175,7 +244,7 @@ Logs explain one request, metrics show the system, traces show where time goes. 
 | Quality | Built now | Roadmap |
 | --- | --- | --- |
 | Scalability | Stateless service, so any number of instances can run behind a load balancer. Correctness under concurrency rests on database constraints, not on in-process state. Pool size is configurable. | Read replicas for availability queries; partition `appointment` by dealership or month; cache reference data |
-| Performance | Candidate queries use GiST indexes (`appointment_dealership_period_idx` and the exclusion indexes). One insert decides. Context loads run in parallel. | Load test with k6; precompute availability; pagination if lists grow |
+| Performance | Overlap queries are covered by GiST indexes: the per-resource exclusion indexes and `appointment_dealership_period_idx` for a dealership's day. One insert decides. Context loads run in parallel. | Load test with k6; precompute availability; pagination if lists grow |
 | Reliability | Constraints prevent double booking. Idempotency keys make client retries safe. Bounded retries. Readiness probe. Graceful shutdown. Survives a database restart. | Outbox for notifications; circuit breaker on the database; multi-region read path |
 | Maintainability | Four layers enforced by lint. Ports and adapters. Pure domain with unit tests. OpenAPI generated and drift-checked. ADRs. Tests named by requirement ID. | Contract tests for clients; mutation testing (StrykerJS) in CI |
 | Observability | Structured logs with request and trace IDs, Prometheus metrics, OpenTelemetry traces | Dashboards and alerts (SLO on booking latency and 5xx rate); log shipping |
@@ -183,11 +252,53 @@ Logs explain one request, metrics show the system, traces show where time goes. 
 
 ## GenAI in the design phase
 
-<!-- Jeremy: write this section in your own words (Step 13). Suggested points:
-     - How you used AI to stress-test the assumptions (AS1–AS16) and which ones you changed.
-     - How the guide, CLAUDE.md, the reviewer subagent, /step and the hooks constrained the AI.
-     - What you verified by hand, and what the AI got wrong (see docs/ai-collaboration/verification-log.md).
-     - The concurrency story: plain INSERT livelock found by stress testing, and the switch to ON CONFLICT DO NOTHING. -->
+GenAI was used in three ways: to turn the brief into a precise, buildable specification; to shape a design that stays correct even when an AI writes the code; and, during the build, as a source of evidence that changed the design. Its output was treated as a draft to verify, never as an answer.
+
+### 1. From brief to specification
+
+With a GenAI assistant, the brief and an execution playbook were turned into one specification, [`implementation-guide.md`](implementation-guide.md). It holds:
+
+- the three requirements quoted verbatim with IDs (A1–A3), so they are never paraphrased away;
+- explicit assumptions where the brief is silent;
+- the exact SQL schema, and an API contract with stable error codes;
+- the booking algorithm;
+- a test specification in which every case has an ID;
+- fifteen build steps, each with checks that are run as commands rather than taken from a summary.
+
+The assistant drafted the assumptions for review before any code existed. AS1–AS13 come from the playbook; writing the specification surfaced three more (AS14–AS16). AS14, "a vehicle cannot have two overlapping confirmed appointments", added a third exclusion constraint to the schema.
+
+<!-- Jeremy: add which assistant you used for the specification, one or two prompts from docs/ai-collaboration/key-prompts.md, and which assumptions you changed and why. -->
+
+### 2. Designing for an AI implementer
+
+The code was to be written by an AI coding agent (Claude Code), so the design puts each guarantee where a plausible but wrong change cannot silently break it:
+
+| Risk with AI-written code | Design response |
+| --- | --- |
+| Check-then-insert race conditions that look correct | The no-overlap rule lives in PostgreSQL exclusion constraints, so the database decides ([ADR-001](adr/0001-database-enforced-no-overlap.md)). Concurrency tests prove it by running 50 requests in parallel. |
+| Tests weakened to make code pass | The acceptance and concurrency tests are written before the code, named by requirement ID and locked by a hook (`.claude/hooks/protect-locked-tests.sh`). |
+| Architecture eroding over many edits | Layer rules are enforced by ESLint and fail CI. A second hook lints every file the agent edits. |
+| Time-dependent bugs hidden by real clocks | The clock is a port; tests run against a fixed instant, with daylight-saving cases. |
+| API docs drifting from the code | OpenAPI is generated from the code, and CI fails if the committed `openapi.yaml` differs. |
+| The agent drifting from the plan | [`CLAUDE.md`](../CLAUDE.md) holds the rules, a plan-first `/step` command, a read-only `reviewer` subagent and a [review checklist](ai-collaboration/review-checklist.md). |
+
+### 3. Evidence from the build changed the design
+
+The specification's concurrency design was a plain `INSERT` that relied on the 23P01 constraint error. It passed every test on a single run. Running the suite repeatedly, and probing PostgreSQL directly, showed that it livelocks when many requests race for one slot: inserts aborted each other as deadlock victims and, in one run, nothing was committed for 33 seconds.
+
+The coding agent tried bounded fixes first: lock timeouts, jittered retries and a faster deadlock detector. It measured each one, and none removed the failures. It then proposed `INSERT … ON CONFLICT DO NOTHING`, backed by a probe that went from 96 rounds in 240 s to 38,172 rounds in 60 s. The agent asked for a decision before changing the specification. The change was approved, ADR-001 was revised with the numbers, and the full suite then passed 30 runs out of 30.
+
+### 4. Verification and limits
+
+Every AI claim was checked by running something: tests, stress loops, `psql`, `curl`, the live stack and a fresh clone. Each finding is recorded in the [verification log](ai-collaboration/verification-log.md), and the prompts that shaped the work are in [key prompts](ai-collaboration/key-prompts.md). Some of the AI output was plausible but wrong, and only measurement exposed it:
+
+- The concurrency design above.
+- Configuration parsing that accepted `OTEL_ENABLED=yes` as true.
+- A database pool without an error handler, which crashed the process when the database restarted (found by testing the readiness probe).
+- A lint rule that mistook the `@opentelemetry/api` package for the API layer.
+- A logging default that recorded client IP addresses.
+
+GenAI made the design faster to write and much faster to test against reality. Decisions that change the design stayed with the engineer: the specification only changes when it is edited deliberately, and the coding agent stopped to ask before it changed the concurrency design.
 
 ## Production roadmap
 
